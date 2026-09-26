@@ -1,0 +1,8 @@
+# 构建产物
+dist/
+
+# 依赖与临时文件
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
