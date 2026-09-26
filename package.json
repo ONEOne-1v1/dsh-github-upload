@@ -1,0 +1,17 @@
+{
+  "name": "dsh-github-upload",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "DeepSeek Harness 动态 Cordis 插件：在界面上加一个按钮，把本地项目一键推送到 GitHub（中英双语）",
+  "description_en": "A dynamic Cordis plugin for DeepSeek Harness: one button that uploads a local project to GitHub (bilingual zh/en)",
+  "scripts": {
+    "build": "node build/bundle.mjs",
+    "check": "node --check src/host.js && node --check src/client.js && node build/bundle.mjs"
+  },
+  "keywords": ["dsh", "cordis", "github", "upload", "plugin"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

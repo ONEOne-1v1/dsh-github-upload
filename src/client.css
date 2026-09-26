@@ -1,0 +1,107 @@
+/* dsh-github-upload — 面板样式
+ * 全部颜色走 DSH 主题变量（--dsw-alias-*），因此自动跟随浅色/深色主题。
+ * 变量定义在 DSH 的 body 上，所以根节点必须挂在 document.body 下才能继承。 */
+
+#dsh-ghu-root, #dsh-ghu-root * { box-sizing: border-box; }
+
+/* 入口按钮：固定在右下角，可拖动 */
+#dsh-ghu-fab{position:fixed;z-index:2147483000;display:flex;align-items:center;gap:8px;height:38px;padding:0 15px 0 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.12));background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dsw-alias-label-primary,#111);font:500 13px/1 var(--dsw-font-family,-apple-system,'Segoe UI',sans-serif);cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.18);user-select:none;-webkit-user-select:none;transition:background .15s ease,box-shadow .15s ease;}
+#dsh-ghu-fab:hover{background:var(--dsw-alias-interactive-bg-hover-solid,#eee);box-shadow:0 8px 26px rgba(0,0,0,.24);}
+#dsh-ghu-fab.ghu-dragging{cursor:grabbing;}
+#dsh-ghu-fab svg{width:18px;height:18px;display:block;fill:currentColor;}
+#dsh-ghu-fab .ghu-dot{position:absolute;top:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:var(--dsw-alias-state-success-primary,#22c55e);border:2px solid var(--dsw-alias-bg-layer-3,#fff);display:none;}
+#dsh-ghu-fab.ghu-bound .ghu-dot{display:block;}
+
+/* 抽屉面板 */
+#dsh-ghu-panel{position:fixed;top:0;right:0;bottom:0;width:520px;max-width:96vw;z-index:2147483001;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111);border-left:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.12));box-shadow:-10px 0 40px rgba(0,0,0,.22);font:13px/1.55 var(--dsw-font-family,-apple-system,'Segoe UI',sans-serif);transform:translateX(102%);transition:transform .22s cubic-bezier(.4,0,.2,1);}
+#dsh-ghu-panel.ghu-open{transform:none;}
+
+.ghu-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.09));flex:0 0 auto;}
+.ghu-head .ghu-ttl{font-weight:600;font-size:14px;flex:1;}
+.ghu-tabs{display:flex;gap:4px;padding:8px 10px 0;border-bottom:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.09));flex:0 0 auto;}
+.ghu-tab{border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font:500 13px/1 inherit;padding:8px 10px 9px;border-radius:8px 8px 0 0;cursor:pointer;border-bottom:2px solid transparent;}
+.ghu-tab:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));}
+.ghu-tab.ghu-on{color:var(--dsw-alias-label-primary,#111);border-bottom-color:var(--dsw-alias-brand-primary,#111);}
+.ghu-body{flex:1 1 auto;overflow:auto;padding:14px;}
+.ghu-foot{flex:0 0 auto;padding:10px 14px;border-top:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.09));display:flex;gap:8px;align-items:center;}
+
+.ghu-sec{margin-bottom:16px;}
+.ghu-sec > h4{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary,#555);text-transform:uppercase;letter-spacing:.04em;}
+.ghu-input,.ghu-textarea{width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.14));background:var(--dsw-specific-input-major,var(--dsw-alias-bg-base,#fff));color:var(--dsw-alias-label-primary,#111);font:13px/1.4 inherit;outline:none;}
+.ghu-input:focus,.ghu-textarea:focus{border-color:var(--dsw-alias-brand-primary,#111);}
+.ghu-textarea{min-height:62px;resize:vertical;}
+
+.ghu-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.14));background:transparent;color:var(--dsw-alias-label-primary,#111);font:500 13px/1.2 inherit;cursor:pointer;white-space:nowrap;}
+.ghu-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}
+.ghu-btn.ghu-primary{background:var(--dsw-alias-brand-primary,#111);color:var(--dsw-alias-bg-base,#fff);border-color:transparent;}
+.ghu-btn.ghu-primary:hover{opacity:.88;}
+.ghu-btn.ghu-danger{color:var(--dsw-alias-state-error-primary,#c00);border-color:var(--dsw-alias-state-error-primary,#c00);}
+.ghu-btn[disabled]{opacity:.5;cursor:not-allowed;}
+.ghu-iconbtn{border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font-size:18px;line-height:1;cursor:pointer;padding:4px 7px;border-radius:6px;}
+.ghu-iconbtn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}
+
+.ghu-row{display:flex;gap:8px;align-items:center;}
+.ghu-grow{flex:1 1 auto;min-width:0;}
+.ghu-lbl{display:block;font-size:12px;color:var(--dsw-alias-label-secondary,#555);margin:10px 0 4px;}
+.ghu-muted{color:var(--dsw-alias-label-tertiary,#777);font-size:12px;}
+.ghu-err{color:var(--dsw-alias-state-error-primary,#c00);background:var(--dsw-alias-state-error-tertiary,rgba(220,0,0,.08));border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:12px;word-break:break-word;}
+.ghu-warn{color:var(--dsw-alias-state-warn-label,#a16207);background:var(--dsw-alias-state-warn-tertiary,rgba(245,158,11,.1));border:1px solid var(--dsw-alias-state-warn-primary,rgba(245,158,11,.4));border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:12px;line-height:1.6;}
+.ghu-warn b{color:var(--dsw-alias-label-primary,#111);}
+.ghu-warn ul{margin:6px 0 0;padding-left:18px;}
+.ghu-ok{color:var(--dsw-alias-state-success-primary,#16a34a);font-size:12px;}
+.ghu-diag{font-family:var(--ds-font-family-code,ui-monospace,Consolas,monospace);font-size:11px;color:var(--dsw-alias-label-tertiary,#888);margin-top:6px;white-space:pre-wrap;}
+
+.ghu-card{border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.1));border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;}
+.ghu-card:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));}
+.ghu-card.ghu-on{border-color:var(--dsw-alias-brand-primary,#111);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary,#111) inset;}
+.ghu-repolist{max-height:320px;overflow:auto;border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.1));border-radius:10px;padding:6px;}
+.ghu-tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#eee);color:var(--dsw-alias-label-secondary,#555);border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.1));margin-left:6px;}
+.ghu-acct{display:flex;align-items:center;gap:10px;}
+.ghu-acct img{width:34px;height:34px;border-radius:50%;}
+
+/* 文件树 */
+.ghu-tree{border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.1));border-radius:10px;max-height:280px;overflow:auto;padding:4px;font-family:var(--ds-font-family-code,ui-monospace,Consolas,monospace);font-size:12px;}
+.ghu-frow{display:flex;align-items:center;gap:6px;padding:1px 4px;border-radius:5px;white-space:nowrap;}
+.ghu-frow:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));}
+.ghu-fname{overflow:hidden;text-overflow:ellipsis;}
+.ghu-fsize{margin-left:auto;color:var(--dsw-alias-label-tertiary,#888);font-size:11px;padding-left:8px;}
+.ghu-drow .ghu-fname{font-weight:600;}
+.ghu-ignored .ghu-fname{color:var(--dsw-alias-label-tertiary,#999);text-decoration:line-through;}
+.ghu-caret{cursor:pointer;width:12px;display:inline-block;text-align:center;color:var(--dsw-alias-label-secondary,#666);}
+.ghu-cb{flex:0 0 auto;margin:0;accent-color:var(--dsw-alias-brand-primary,#111);}
+
+/* 上传进度 */
+.ghu-bar{height:6px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#e5e5e5);overflow:hidden;margin:6px 0;}
+.ghu-bar > i{display:block;height:100%;background:var(--dsw-alias-brand-primary,#111);transition:width .2s ease;}
+.ghu-log{font-family:var(--ds-font-family-code,ui-monospace,Consolas,monospace);font-size:11px;white-space:pre-wrap;max-height:150px;overflow:auto;background:var(--dsw-alias-markdown-code-block,#f5f5f5);border-radius:8px;padding:8px;margin-top:8px;color:var(--dsw-alias-label-secondary,#444);}
+
+.ghu-toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);z-index:2147483002;background:var(--dsw-alias-toast-bg,#333);color:#fff;padding:9px 15px;border-radius:9px;font:13px/1.4 var(--dsw-font-family,sans-serif);box-shadow:0 8px 26px rgba(0,0,0,.3);max-width:70vw;}
+.ghu-link{color:var(--dsw-alias-state-business-primary,#2563eb);word-break:break-all;}
+.ghu-kv{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:2px 0;}
+.ghu-switch{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#555);cursor:pointer;}
+
+/* ---- 文件夹选择弹层（native 后端不可用时的内置浏览器） ---- */
+.ghu-backdrop{position:fixed;inset:0;z-index:2147483010;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-mask-3,rgba(0,0,0,.48));}
+.ghu-modal{width:660px;max-width:94vw;max-height:84vh;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111);border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.12));border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.35);font:13px/1.5 var(--dsw-font-family,-apple-system,'Segoe UI',sans-serif);overflow:hidden;}
+.ghu-modal-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.09));flex:0 0 auto;}
+.ghu-modal-head .ghu-ttl{flex:1;font-weight:600;font-size:14px;}
+.ghu-modal-tools{display:flex;flex-wrap:wrap;gap:6px;padding:10px 14px 0;flex:0 0 auto;}
+.ghu-chip{padding:4px 10px;font-size:12px;border-radius:999px;}
+.ghu-crumbs{display:flex;flex-wrap:wrap;align-items:center;padding:8px 14px 0;font-size:12px;font-family:var(--ds-font-family-code,ui-monospace,Consolas,monospace);flex:0 0 auto;}
+.ghu-crumb{cursor:pointer;color:var(--dsw-alias-state-business-primary,#2563eb);padding:1px 3px;border-radius:4px;}
+.ghu-crumb:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}
+.ghu-crumb-sep{color:var(--dsw-alias-label-tertiary,#999);}
+.ghu-pathbar{margin:8px 14px 0;padding:6px 9px;border-radius:8px;background:var(--dsw-alias-markdown-code-block,#f5f5f5);font-family:var(--ds-font-family-code,ui-monospace,Consolas,monospace);font-size:12px;word-break:break-all;color:var(--dsw-alias-label-secondary,#444);flex:0 0 auto;}
+
+.ghu-modal-list{flex:1 1 auto;overflow:auto;margin:10px 14px;border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.1));border-radius:10px;min-height:180px;}
+.ghu-dirrow{display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;border-radius:6px;margin:2px;}
+.ghu-dirrow:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}
+.ghu-diricon{width:16px;display:inline-block;text-align:center;}
+.ghu-hiddenrow{opacity:.55;}
+.ghu-modal-foot{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.09));flex-wrap:wrap;flex:0 0 auto;}
+
+/* ---- 语言开关 / language switch ---- */
+.ghu-lang{display:flex;flex:0 0 auto;border:1px solid var(--dsw-alias-border-l3,rgba(0,0,0,.14));border-radius:999px;overflow:hidden;}
+.ghu-langbtn{border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font:500 11px/1 var(--dsw-font-family,sans-serif);padding:5px 9px;cursor:pointer;}
+.ghu-langbtn.ghu-on{background:var(--dsw-alias-brand-primary,#111);color:var(--dsw-alias-bg-base,#fff);}
+.ghu-langbtn:not(.ghu-on):hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));}
