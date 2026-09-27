@@ -16,7 +16,9 @@ Bilingual UI (中文 / English, switchable in the panel header). [中文说明](
 | --- | --- |
 | **Account** | Paste a GitHub Personal Access Token → verify and bind; shows token type / scopes / expiry, with an actionable hint when the token cannot see repositories; optional "remember"; one-click environment self-test |
 | **Repositories** | Lists every repository the account can reach (owned + collaborator + organization member + organizations + public fallback), searchable and selectable; create a repository as public or private; **the list refreshes automatically after create / rename / visibility change**; when the list is unusable, point at `owner/repo` directly |
-| **Upload** | **Pick the project folder on this machine** (`Choose folder`: system dialog, or the built-in browser), or type the path → scan (built-in ignore rules + `.gitignore`) → tick the files to upload in a directory tree → commit message / target branch / optional "delete remote files that are not selected" → upload with live progress and a log |
+| **Upload** | **The project directory is detected from the chat itself** — open the tab and the folder this conversation is working in is already filled in (no folder-picking required) → scan (built-in ignore rules + `.gitignore`) → **"Files from this chat" ticks the files this conversation wrote or edited** (each such file also carries a marker in the tree) → commit message / target branch → upload with live progress and a log. `Choose folder` (system dialog or built-in browser) and manual entry remain available. |
+
+> **What does ticking actually do?** Ticked files are **added or overwritten** on GitHub; files left unticked **stay exactly as they are on the remote**. Only the「exact sync」checkbox (`Delete remote files that are not selected`) removes remote files. Ticking everything is therefore the right move for a plain "push my project" — the per-chat selection exists for focused commits and for skipping a large repo's untouched files.
 | **Repository settings** | Rename, description, homepage, topics, public ↔ private, Issues/Wiki switches, archive, delete |
 
 ---
@@ -89,6 +91,23 @@ Then hand `dist/ghpush-package.json` to:
 
 The first version inlined the UI source into the host source, so every one-line UI tweak meant re-defining a ~40KB payload. Reading from disk at request time makes UI iteration a page refresh.
 
+### Tests
+
+```bash
+npm run check     # client syntax → build (host syntax precheck) → render smoke test → cleanDir unit test
+npm test          # just the two test files
+```
+
+`scripts/test-render.mjs` is a **headless smoke test**: it mounts `src/client.js` against a minimal DOM stub, then clicks the entry button, switches to the Upload tab and presses Scan, asserting that a request is actually issued. It exists because the worst bug so far was a `render()` crash — the backend was perfectly healthy and `curl` could not see it, but the UI silently stopped responding.
+
+The test carries its own negative control:
+
+```bash
+NEGATIVE_CONTROL=drop-null-guard node scripts/test-render.mjs   # must FAIL
+```
+
+which re-injects that exact bug and must reproduce the symptom, proving the test can still catch it.
+
 ---
 
 ## 5. Host API
@@ -110,6 +129,7 @@ Every browser call is `POST /dsh-gh/api` with `{ op, lang, ...args }`, answering
 | `list-branches` | `owner, repo` | Branch list |
 | `delete-repo` | `owner, repo` | Delete a repository (needs `delete_repo`) |
 | `scan` | `dir, useGitignore` | Recursively scan a directory: file list, ignore reasons, pruned directories |
+| `session-files` | `dir?` | Detect the files this chat wrote / edited / read, by replaying `tool/call` records from a session. **Omit `dir`** to have the host pick the live session and infer the project root from the common directory of the files it mutated (returns `projectRoot` + `rootSource`) |
 | `pick-folder` | — | Open the folder picker: the `native` backend opens the OS dialog and returns an absolute path; `browse`/none returns a `mode` so the UI draws its own browser |
 | `list-dirs` | `path` | List one directory level (crumbs, jumpable roots, whether folder creation is supported) |
 | `mkdir-dir` | `parent, name` | Create a folder (only with the `browse` backend; the system dialog has its own "New folder") |
@@ -152,7 +172,8 @@ Uploads go through the GitHub **Git Data API**: read branch head → create one 
 - The ignore engine is a simplified `.gitignore` (comments, `!` negation, trailing `/`, `*` / `**` / `?`); unusual patterns may be inaccurate — which is why ignored files stay tickable in the UI.
 - Ignored directories come in two tiers: dependency/cache directories (`node_modules`, `.git`, `.venv`, …) are skipped **entirely** and their files never appear (the directory names are reported in the scan result); build-output directories (`dist`, `build`, `out`, `target`, …) are only **unticked by default** and remain visible and tickable.
 - The token is written to the **host credential store** (`ctx.credentials`, reference `DSH_GITHUB_UPLOAD_TOKEN` → `~/.dsh/.credentials.yaml`) so it survives plugin restarts and DSH restarts, and is also kept in browser `localStorage` when "remember" is ticked. It is **never sent to the model**.
-- A dynamic plugin is process-local: **after a DSH restart it must be defined / run again**.
+- A dynamic plugin is process-local: **after a DSH restart it must be defined / run again** (the token survives in the credential store, so nothing needs re-binding).
+- Chat-file detection reads the session log's `tool/call` records, so it recognizes the `write` / `edit` / `read` / `grep` / `glob` tools. Files touched only through shell commands, or by a subagent's own session, are **not** attributed to this chat.
 - Uploading builds a blob per file, so very large projects produce many API calls; the GitHub API is rate limited.
 
 ---
@@ -162,7 +183,9 @@ Uploads go through the GitHub **Git Data API**: read branch head → create one 
 1. **No button** → refresh the page (the entry script is injected at page load); confirm `http://127.0.0.1:<port>/dsh-gh/app.js` opens.
 2. **The button is there but the panel reports it cannot read the UI assets** → `ASSET_DIR` in `src/host.js` points at an old path; fix it or re-run `npm run build`.
 3. **Bound, but the repository list is empty** → read the "source diagnostics" and the guidance in the panel; check the token scopes first (section 7), or type `owner/repo` under "Point at a repository directly".
-4. **"Choose folder" shows no system dialog** → the host's `directoryPicker` native backend is unavailable (koffi missing, or a remote deployment). The panel silently switches to its built-in browser; the current picker kind is shown under Account → Local environment.
-5. **Upload returns 403 / 404** → the token lacks `Contents: write`, or the owner / repository name is wrong.
-6. **"Git Repository is empty"** → the target repository has no commits yet. This is handled automatically since 0.5.0; if you still see it, the Contents-API bootstrap failed — read the job log for the seeding line.
-7. **Language looks half-switched** → switching language clears the previous scan and job state on purpose (host-rendered strings such as ignore reasons are already in the old language). Re-scan if you had one.
+4. **"Choose folder" opens the built-in browser, not a system dialog** → this is deliberate. The host's native picker can hang forever when its OS dialog cannot open (missing koffi, remote deployment), which used to freeze the button. The built-in browser only uses the host's `fs` listing and always works; the system dialog is available as an optional "Try the system dialog" button inside it, guarded by a 25-second timeout. Account → Local environment shows which backend kind is active.
+5. **"Scan" does nothing / the Upload tab looks half-drawn** → this was a frontend crash (fixed in 0.7.1) where `render()` threw before the request was sent. If it ever comes back, run `npm run check`: the headless smoke test asserts that clicking Scan actually issues a request.
+6. **Upload returns 403 / 404** → the token lacks `Contents: write`, or the owner / repository name is wrong.
+7. **"Git Repository is empty"** → the target repository has no commits yet. This is handled automatically since 0.5.0; if you still see it, the Contents-API bootstrap failed — read the job log for the seeding line.
+8. **The default directory came back wrapped in quotes** → this was **our own bug** (fixed in 0.7.2), not a bad paste. `keep()` writes to `localStorage` with `JSON.stringify`, so the stored text already contains quotes; `boot()` used to read it back raw and the quotes became part of the path — producing exactly the `Directory does not exist: "D:\..."` error seen earlier. Every preference is now read through `readString()` (JSON-decoding, tolerant of legacy double-encoding) and self-healed on startup. The path field still tolerates a pasted quoted path, since that genuinely happens too.
+9. **Language looks half-switched** → switching language clears the previous scan and job state on purpose (host-rendered strings such as ignore reasons are already in the old language). Re-scan if you had one.

@@ -70,6 +70,13 @@
 .ghu-caret{cursor:pointer;width:12px;display:inline-block;text-align:center;color:var(--dsw-alias-label-secondary,#666);}
 .ghu-cb{flex:0 0 auto;margin:0;accent-color:var(--dsw-alias-brand-primary,#111);}
 
+/* 会话标记：本聊天里动过的文件 / markers for files this chat touched */
+.ghu-mark{flex:0 0 auto;width:7px;height:7px;border-radius:50%;display:inline-block;}
+.ghu-mark-written{background:var(--dsw-alias-state-success-primary,#22c55e);}
+.ghu-mark-edited{background:var(--dsw-alias-state-business-primary,#2563eb);}
+.ghu-mark-read{background:var(--dsw-alias-label-tertiary,#999);opacity:.6;}
+.ghu-mark-searched{background:var(--dsw-alias-label-dimmed,#ccc);}
+
 /* 上传进度 */
 .ghu-bar{height:6px;border-radius:999px;background:var(--dsw-alias-bg-layer-3,#e5e5e5);overflow:hidden;margin:6px 0;}
 .ghu-bar > i{display:block;height:100%;background:var(--dsw-alias-brand-primary,#111);transition:width .2s ease;}

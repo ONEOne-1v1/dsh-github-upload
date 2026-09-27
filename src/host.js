@@ -116,14 +116,24 @@ const M = {
   seedFail: ['空仓库初始化失败（{1}）：{2}', 'Could not initialize the empty repository ({1}): {2}'],
   logBranchOff: ['分支 {1} 尚不存在，将从 {2} 分出',
     'Branch {1} does not exist yet; branching it off {2}'],
+
+  // 会话文件识别 / session file detection
+  sessionUnavailable: ['宿主没有会话查询服务，无法识别聊天中改动的文件',
+    'The host exposes no session-query service, so files touched in the chat cannot be detected.'],
+  sessionNone: ['没有找到任何会话记录', 'No session records were found.'],
+  sessionNoFiles: ['在会话《{1}》里没有找到写入或修改过的文件',
+    'No written or edited files were found in session "{1}".'],
+  sessionNoRoot: ['识别到会话《{1}》，但推断不出项目目录（曾改动的文件跨了多个盘或根）',
+    'Found session "{1}", but its project directory cannot be inferred (the touched files span several roots).'],
 }
 
-/** 取一条文案并替换占位符。 */
-function tr(lang, key, a, b) {
+/** 取一条文案并替换占位符（最多三个）。 */
+function tr(lang, key, a, b, c) {
   const row = M[key]
   let s = row === undefined ? key : (lang === 'en' ? row[1] : row[0])
   if (a !== undefined) s = s.split('{1}').join(String(a))
   if (b !== undefined) s = s.split('{2}').join(String(b))
+  if (c !== undefined) s = s.split('{3}').join(String(c))
   return s
 }
 
@@ -214,6 +224,8 @@ return {
     const dp = ctx.get('directoryPicker')
     // 可选服务：宿主凭据库。用来把 GitHub 令牌持久化，免得插件重启后又要重新绑定。
     const creds = ctx.get('credentials')
+    // 可选服务：会话查询。用来识别「这次聊天里改过哪些文件」。
+    const sessionQuery = ctx.get('sessionQuery')
     if (fsx === undefined || sp === undefined || wsvc === undefined) {
       console.error('[dsh-github-upload] 缺少 fs / subprocess / webServer 服务，插件未激活')
       return
@@ -972,6 +984,253 @@ return {
       return await fsListing(pathArg, lang)
     }
 
+    // ── 会话文件识别 ──────────────────────────────────────────────
+    //
+    // DSH 的会话日志里每个 `tool/call` 都带 name 和 arguments（JSON 字符串），
+    // 从中可以还原「这次聊天里写过/改过哪些文件」。语义与客户端 ui-deliverables 的
+    // produced-files 一致：写入/修改才算「产出」，read 只作为参考强度更低的一档。
+
+    const TOOL_ACTION = {
+      write: { action: 'written', rank: 4 },
+      edit: { action: 'edited', rank: 3 },
+      read: { action: 'read', rank: 2 },
+      grep: { action: 'searched', rank: 1 },
+      glob: { action: 'searched', rank: 1 },
+    }
+
+    /** 归一化路径用于比较：转正斜杠、转小写、去掉尾部分隔符。 */
+    function normPath(p) {
+      const s = String(p === undefined || p === null ? '' : p)
+      let out = ''
+      for (let i = 0; i < s.length; i++) {
+        const ch = s.charAt(i)
+        out += ch === BS ? '/' : ch
+      }
+      out = out.toLowerCase()
+      while (out.length > 1 && out.charAt(out.length - 1) === '/') out = out.slice(0, -1)
+      return out
+    }
+
+    /** 拆路径段（同时认 / 和 \）。 */
+    function pathSegments(p) {
+      const out = []
+      let cur = ''
+      for (let i = 0; i < p.length; i++) {
+        const ch = p.charAt(i)
+        if (ch === BS || ch === '/') {
+          if (cur) { out.push(cur); cur = '' }
+        } else {
+          cur += ch
+        }
+      }
+      if (cur) out.push(cur)
+      return out
+    }
+
+    /** 看起来是绝对路径吗（盘符或根开头）？相对路径会污染公共祖先，直接跳过。 */
+    function looksAbsolute(p) {
+      if (!p) return false
+      if (p.charAt(0) === '/' || p.charAt(0) === BS) return true
+      return p.length > 2 && p.charAt(1) === ':' && (p.charAt(2) === BS || p.charAt(2) === '/')
+    }
+
+    /**
+     * 一批文件路径的最深公共目录 —— 也就是「这个项目在哪」。
+     * 只有公共前缀至少到「根 + 一层目录」才算项目目录，否则返回空串，
+     * 由调用方退回会话的 cwd（避免跨盘时把 C:\ 这种根当成项目）。
+     */
+    function commonDirOf(paths) {
+      if (!paths.length) return ''
+      const first = pathSegments(paths[0])
+      const sep = paths[0].indexOf(BS) !== -1 ? BS : '/'
+      let n = first.length
+      for (let i = 1; i < paths.length; i++) {
+        const segs = pathSegments(paths[i])
+        let k = 0
+        while (k < n && k < segs.length && segs[k].toLowerCase() === first[k].toLowerCase()) k++
+        n = Math.min(n, k)
+        if (n === 0) return ''
+      }
+      // 只有一个文件（或路径完全相同）时，最后一段是文件名，退一层
+      while (n > 0 && n >= first.length) n--
+      if (n < 2) return ''
+      return first.slice(0, n).join(sep)
+    }
+
+    /**
+     * 找出「当前聊天」动过的文件，并据此推断项目目录。
+     *
+     * 会话选择：
+     *   - 给了 dir：按 header.cwd 与它匹配优先，取创建时间最新的；
+     *   - 没给 dir（前端刚打开、还没选文件夹）：优先「活着的」会话（ctx.sessions 里的，
+     *     也就是当前这次聊天），再取最新的 —— 这样不用先选目录就能识别项目。
+     * 项目根推断：给了 dir 就用它；否则取被写入/修改文件的最深公共目录；
+     * 公共目录太浅（跨盘）时退回该会话的 cwd。
+     */
+    async function sessionFileActivity(dir, lang) {
+      if (sessionQuery === undefined) {
+        return { available: false, message: tr(lang, 'sessionUnavailable'), files: [] }
+      }
+      let records = []
+      try {
+        records = await sessionQuery.listSessions()
+      } catch (e) { records = [] }
+      if (!Array.isArray(records)) records = []
+
+      const givenRoot = normPath(dir)
+      const candidates = []
+      for (let i = 0; i < records.length; i++) {
+        const rec = records[i]
+        const h = rec && rec.header ? rec.header : null
+        if (!h || !h.id) continue
+        const rawCwd = String(h.cwd || '')
+        const cwd = normPath(rawCwd)
+        const matches = cwd !== '' && givenRoot !== ''
+          && (cwd === givenRoot || givenRoot.indexOf(cwd + '/') === 0 || cwd.indexOf(givenRoot + '/') === 0)
+        candidates.push({
+          id: String(h.id),
+          cwd: cwd,
+          rawCwd: rawCwd,
+          createdAt: typeof h.createdAt === 'number' ? h.createdAt : 0,
+          live: rec.live === true,
+          matches: matches,
+        })
+      }
+      if (!candidates.length) {
+        return { available: true, message: tr(lang, 'sessionNone'), files: [] }
+      }
+
+      let pool
+      let chosenBy
+      if (givenRoot) {
+        const matching = candidates.filter(function (c) { return c.matches })
+        pool = matching.length ? matching : candidates
+        chosenBy = matching.length ? 'cwd' : 'newest'
+      } else {
+        const liveOnes = candidates.filter(function (c) { return c.live })
+        pool = liveOnes.length ? liveOnes : candidates
+        chosenBy = liveOnes.length ? 'live' : 'newest'
+      }
+      pool.sort(function (a, b) { return b.createdAt - a.createdAt })
+      const chosen = pool[0]
+
+      let title = ''
+      try {
+        const snap = await sessionQuery.readTitle(chosen.id)
+        if (snap && typeof snap.title === 'string') title = snap.title
+        else if (snap && typeof snap.text === 'string') title = snap.text
+      } catch (e) { title = '' }
+
+      let events = []
+      try {
+        const log = await sessionQuery.readSession(chosen.id)
+        events = log && Array.isArray(log.events) ? log.events : []
+      } catch (e) { events = [] }
+
+      // 第一遍：把工具调用还原成 (绝对路径, 动作) 列表
+      const touched = []
+      const mutatedAbs = []
+      const counts = { written: 0, edited: 0, read: 0, searched: 0 }
+      let toolCalls = 0
+      for (let i = 0; i < events.length; i++) {
+        const ev = events[i]
+        if (!ev || ev.type !== 'tool/call' || !ev.data) continue
+        toolCalls++
+        const spec = TOOL_ACTION[String(ev.data.name || '')]
+        if (!spec) continue
+        let abs = ''
+        try {
+          const parsed = JSON.parse(String(ev.data.arguments || '{}'))
+          if (parsed && typeof parsed.file_path === 'string') abs = parsed.file_path
+          else if (parsed && typeof parsed.path === 'string') abs = parsed.path
+        } catch (e) { abs = '' }
+        if (!abs || !looksAbsolute(abs)) continue
+        touched.push({ abs: abs, norm: normPath(abs), action: spec.action, rank: spec.rank })
+        if (spec.action === 'written' || spec.action === 'edited') mutatedAbs.push(abs)
+      }
+
+      // 第二遍：定项目根，再算相对路径
+      let rootRaw = ''
+      let rootSource = 'none'
+      let root = ''
+      if (givenRoot) {
+        rootRaw = String(dir || '').trim()
+        root = givenRoot
+        rootSource = 'given'
+      } else {
+        const guess = commonDirOf(mutatedAbs)
+        if (guess) {
+          rootRaw = guess
+          root = normPath(guess)
+          rootSource = 'files'
+        } else if (chosen.rawCwd) {
+          rootRaw = chosen.rawCwd
+          root = chosen.cwd
+          rootSource = 'cwd'
+        }
+      }
+
+      const session = {
+        id: chosen.id,
+        cwd: chosen.cwd,
+        rawCwd: chosen.rawCwd,
+        title: title,
+        matched: chosen.matches,
+        chosenBy: chosenBy,
+        live: chosen.live,
+        sessions: candidates.length,
+      }
+      if (!root) {
+        return {
+          available: true, session: session, counts: counts,
+          projectRoot: '', rootSource: 'none',
+          message: tr(lang, 'sessionNoRoot', title || chosen.id),
+          files: [],
+        }
+      }
+
+      const best = {}
+      let outside = 0
+      for (let i = 0; i < touched.length; i++) {
+        const t = touched[i]
+        if (t.norm === root) continue
+        if (t.norm.indexOf(root + '/') !== 0) { outside++; continue }
+        const relative = t.norm.slice(root.length + 1)
+        if (!relative) continue
+        const prev = best[relative]
+        if (prev === undefined || t.rank > prev.rank) best[relative] = { action: t.action, rank: t.rank }
+      }
+
+      const files = []
+      const keys = Object.keys(best)
+      for (let i = 0; i < keys.length; i++) {
+        const action = best[keys[i]].action
+        if (counts[action] !== undefined) counts[action]++
+        files.push({ path: keys[i], action: action })
+      }
+      files.sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0 })
+
+      if (!files.length) {
+        return {
+          available: true, session: session, counts: counts,
+          projectRoot: rootRaw, rootSource: rootSource,
+          message: tr(lang, 'sessionNoFiles', title || chosen.id),
+          files: [],
+        }
+      }
+      return {
+        available: true,
+        session: session,
+        counts: counts,
+        inside: files.length,
+        outside: outside,
+        toolCalls: toolCalls,
+        projectRoot: rootRaw,
+        rootSource: rootSource,
+        files: files,
+      }
+    }
+
     // ── 编码 ──────────────────────────────────────────────────────
 
     /** 手写 base64：沙箱里的 btoa 只接受「UTF-8 文本」，二进制必须按字节编码。 */
@@ -1442,6 +1701,8 @@ return {
       }
 
       if (op === 'scan') return await scanProject(String(args.dir || ''), args.useGitignore !== false, lang)
+
+      if (op === 'session-files') return await sessionFileActivity(String(args.dir || ''), lang)
 
       if (op === 'upload-start') {
         jobSeq += 1

@@ -136,8 +136,8 @@
     upDirPh: ['项目目录绝对路径', 'Absolute path to the project directory'],
     upChoose: ['选择文件夹', 'Choose folder'],
     upChoosing: ['等待系统对话框…', 'Waiting for the system dialog…'],
-    upChooseTip: ['在本机选择项目文件夹（弹出系统对话框，或使用内置文件浏览器）',
-      'Pick the project folder on this machine (system dialog, or the built-in browser)'],
+    upChooseTip: ['打开内置文件浏览器选择项目文件夹（不依赖任何系统组件，随时可用）',
+      'Open the built-in file browser to pick the project folder (no OS component involved; always available)'],
     upScan: ['扫描', 'Scan'],
     upScanning: ['扫描中…', 'Scanning…'],
     upScanHint: ['点「扫描」列出目录内容，然后勾选本次要上传的文件。',
@@ -146,6 +146,51 @@
     upAll: ['全选', 'All'],
     upNone: ['清空', 'None'],
     upReset: ['恢复默认', 'Defaults'],
+    upPickSession: ['本聊天改动的文件', 'Files from this chat'],
+    upPickSessionTip: ['识别当前工作区对应会话里被写入 / 修改过的文件并勾选',
+      'Detect the files written or edited in the session for this workspace and tick them'],
+    upPickSessionHint: ['自动识别本次聊天里动过的文件，省得在几百个文件里手动勾选',
+      'Detects the files this chat touched, so you do not have to tick through hundreds of files'],
+    upSessionPicking: ['识别中…', 'Detecting…'],
+    upSessionNone: ['没有识别到本会话改动的文件', 'No files from this session were detected.'],
+    upSessionPicked: ['已按会话《{1}》勾选 {2} 个文件', 'Ticked {2} file(s) from session "{1}"'],
+    noteSession: ['来源会话《{1}》 · 本会话写入/修改 {2} 个文件，其中 {3} 个在项目目录内',
+      'Source session "{1}" · this session wrote or edited {2} file(s), {3} inside the project'],
+    noteSessionOutside: ['（另有 {1} 个改动文件在项目目录之外）', ' ({1} touched file(s) lie outside the project)'],
+    markWritten: ['本会话写入', 'written in this session'],
+    markEdited: ['本会话修改', 'edited in this session'],
+    markRead: ['本会话读取', 'read in this session'],
+    markSearched: ['本会话检索', 'searched in this session'],
+    dirCleaned: ['已自动去掉路径两端的引号 / 多余分隔符（资源管理器「复制为路径」会带引号）',
+      'Stripped the surrounding quotes / extra separators from the path (Explorer\'s "Copy as path" adds quotes)'],
+
+    // 项目目录识别 / project-directory detection
+    detectBusy: ['正在从本次聊天识别项目目录…', 'Detecting the project directory from this chat…'],
+    detectFound: ['本次聊天的项目目录', 'Project directory from this chat'],
+    detectNote: ['来自会话《{1}》 · 本会话写入/修改 {2} 个文件',
+      'From session "{1}" · this session wrote or edited {2} file(s)'],
+    detectUse: ['使用并扫描', 'Use and scan'],
+    detectScan: ['扫描这个目录', 'Scan this directory'],
+    detectIgnore: ['忽略', 'Dismiss'],
+    detectOther: ['（已自动填入，可手动改）', ' (filled in automatically; you can edit it)'],
+    detectFailed: ['没有从本次聊天识别到项目目录：{1}', 'Could not detect a project directory from this chat: {1}'],
+    upSelectionNote: ['勾选的会在 GitHub 上新增或覆盖；未勾选的保持原样（除非打开下面那个「完全同步」，它才会删掉远程多余文件）。想直接推整个项目就点「全选」。',
+      'Ticked files are added or overwritten on GitHub; unticked files stay as they are (unless you enable exact sync below, which deletes remote extras). To push the whole project, just press All.'],
+    upPickSession: ['本聊天改动的文件', 'Files from this chat'],
+    upPickSessionTip: ['识别当前工作区对应会话里被写入 / 修改过的文件并勾选',
+      'Detect the files written or edited in the session for this workspace and tick them'],
+    upPickSessionHint: ['自动识别本次聊天里动过的文件，省得在几百个文件里手动勾选',
+      'Detects the files this chat touched, so you do not have to tick through hundreds of files'],
+    upSessionPicking: ['识别中…', 'Detecting…'],
+    upSessionNone: ['没有识别到本会话改动的文件', 'No files from this session were detected.'],
+    upSessionPicked: ['已按会话《{1}》勾选 {2} 个文件', 'Ticked {2} file(s) from session "{1}"'],
+    noteSession: ['来源会话《{1}》 · 本会话写入/修改 {2} 个文件，其中 {3} 个在项目目录内',
+      'Source session "{1}" · this session wrote or edited {2} file(s), {3} inside the project'],
+    noteSessionOutside: ['（另有 {1} 个改动文件在项目目录之外）', ' ({1} touched file(s) lie outside the project)'],
+    markWritten: ['本会话写入', 'written in this session'],
+    markEdited: ['本会话修改', 'edited in this session'],
+    markRead: ['本会话读取', 'read in this session'],
+    markSearched: ['本会话检索', 'searched in this session'],
     upFilterPh: ['按路径过滤，例如 src/', 'Filter by path, e.g. src/'],
     upShowIgnored: ['显示被忽略', 'Show ignored'],
     upCommit: ['提交信息', 'Commit message'],
@@ -209,6 +254,9 @@
     pkChosen: ['已选择：{1}', 'Selected: {1}'],
     pkNativeFail: ['系统文件夹对话框打开失败：{1}（已切换为内置文件浏览器）',
       'The system folder dialog failed to open: {1} (switched to the built-in browser)'],
+    pkTryNative: ['试试系统对话框', 'Try the system dialog'],
+    pickTimeout: ['系统对话框 25 秒内没有响应（本机的原生选择器可能不可用），已放弃等待 —— 请用「选择文件夹」的内置浏览器。',
+      'The system dialog did not respond within 25 seconds (the native picker may be unavailable here); stopped waiting — use the built-in browser behind "Choose folder".'],
 
     // 其他 / misc
     scanDone: ['扫描完成：{1} 个文件', 'Scan finished: {1} file(s)'],
@@ -221,12 +269,13 @@
       'Only the first 6,000 rows are shown; narrow it down with the filter'],
   };
 
-  /** 取一条文案并替换 {1} / {2}。 */
-  function t(key, a, b) {
+  /** 取一条文案并替换 {1} / {2} / {3}。 */
+  function t(key, a, b, c) {
     var row = M[key];
     var s = row ? (S.lang === 'en' ? row[1] : row[0]) : key;
     if (a !== undefined) s = s.split('{1}').join(String(a));
     if (b !== undefined) s = s.split('{2}').join(String(b));
+    if (c !== undefined) s = s.split('{3}').join(String(c));
     return s;
   }
 
@@ -241,6 +290,9 @@
     newOpen: false, newName: '', newPrivate: true, newDesc: '',
     manual: '',
     dir: '', scan: null, picked: {}, collapsed: {}, fileFilter: '', showIgnored: false,
+    sessionFiles: {}, sessionInfo: null, sessionBusy: false,
+    sessionRoot: '', pendingSessionPick: false,
+    detect: null, detectBusy: false, detectError: '', detectFiles: {}, detectFilled: false,
     stats: {}, totalFiles: 0, selFiles: 0, selBytes: 0,
     branch: '', branches: [], message: '', prune: false,
     job: null, poll: null, edit: null, error: '', check: '', env: null,
@@ -298,6 +350,61 @@
   }
 
   function baseName(p) { var i = p.lastIndexOf('/'); return i === -1 ? p : p.slice(i + 1); }
+
+  /**
+   * 清洗用户输入的目录路径。手动输入路径最容易踩的三个坑：
+   *   1. Windows 资源管理器「复制为路径」会给路径套一层引号（"D:\a\b"）；
+   *   2. 从别处复制时可能带上重复分隔符（D:\\a\\b）；
+   *   3. 首尾空格 / 尾随分隔符。
+   * 这些都会让 fs 直接报「目录不存在」，所以进任何接口前先归一化。
+   */
+  function cleanDir(raw) {
+    var s = String(raw === null || raw === undefined ? '' : raw).trim();
+    // 剥掉整层包裹的引号（半角与全角，成对才剥），最多两层
+    for (var i = 0; i < 2; i++) {
+      if (s.length < 2) break;
+      var a = s.charAt(0);
+      var b = s.charAt(s.length - 1);
+      var pair = (a === '"' && b === '"') || (a === "'" && b === "'")
+        || (a === '\u201C' && b === '\u201D') || (a === '\u2018' && b === '\u2019');
+      if (!pair) break;
+      s = s.slice(1, -1).trim();
+    }
+    if (!s) return '';
+    // UNC 前缀（\\server\share）保留开头的双分隔符
+    var prefix = '';
+    if (s.length > 1
+      && (s.charAt(0) === '\\' || s.charAt(0) === '/')
+      && (s.charAt(1) === '\\' || s.charAt(1) === '/')) {
+      prefix = s.slice(0, 2);
+      s = s.slice(2);
+    }
+    var out = '';
+    var prevSep = false;
+    for (var j = 0; j < s.length; j++) {
+      var ch = s.charAt(j);
+      if (ch === '\\' || ch === '/') {
+        if (prevSep) continue;
+        prevSep = true;
+        out += ch;
+      } else {
+        prevSep = false;
+        out += ch;
+      }
+    }
+    var full = prefix + out;
+    // 去掉尾随分隔符，但保留根（C:\ 或 /）
+    while (full.length > 1) {
+      var last = full.charAt(full.length - 1);
+      if (last !== '\\' && last !== '/') break;
+      var stem = full.slice(0, -1);
+      if (stem === '' || stem === '\\' || stem === '/') break;
+      if (stem.length === 2 && stem.charAt(1) === ':') break;
+      full = stem;
+    }
+    return full;
+  }
+
   function fmtSize(n) {
     if (!n) return '0 B';
     if (n < 1024) return n + ' B';
@@ -379,6 +486,28 @@
     } catch (e) { /* ignore */ }
   }
 
+  /**
+   * 读取一个字符串型偏好。
+   *
+   * `keep()` 写入的是 `JSON.stringify(value)`，所以存储里的文本本身带引号、反斜杠也转义了
+   * （`"D:\\a"`）。以前这里用 `localStorage.getItem` 直接读，于是读回来的字符串**字面上就带引号**，
+   * 默认填进目录框后一扫描就报「目录不存在："D:\\a"」—— 引号是这么来的，不是用户粘贴的。
+   * 这里统一解析，并容忍历史上可能被二次编码的值。
+   */
+  function readString(key, fallback) {
+    var v = null;
+    try { v = localStorage.getItem(key); } catch (e) { return fallback; }
+    if (v === null || v === '') return fallback;
+    for (var i = 0; i < 3; i++) {
+      if (typeof v !== 'string') break;
+      var next = null;
+      try { next = JSON.parse(v); } catch (e2) { break; }
+      if (typeof next !== 'string' || next === v) break;
+      v = next;
+    }
+    return typeof v === 'string' ? v : fallback;
+  }
+
   function setupFab(pos) {
     var x = typeof pos.x === 'number' ? pos.x : null;
     var y = typeof pos.y === 'number' ? pos.y : null;
@@ -414,6 +543,8 @@
         S.open = !S.open;
         render();
         if (S.open && S.bound && !S.repos.length) loadRepos();
+        // 打开面板时如果正好停在上传页，顺手把项目目录识别出来（不用先选文件夹）。
+        if (S.open && S.tab === 'upload') detectProject();
       }
     });
   }
@@ -421,8 +552,8 @@
   /* ---------- 语言 ---------- */
 
   function initLang() {
-    var saved = '';
-    try { saved = localStorage.getItem(LS_LANG) || ''; } catch (e) { saved = ''; }
+    // 之前这里直接读原文，存进去的其实是 `"zh"`（带引号），所以语言偏好从来没生效过。
+    var saved = readString(LS_LANG, '');
     if (saved === 'zh' || saved === 'en') { S.lang = saved; return; }
     var nav = (navigator.language || navigator.userLanguage || '').toLowerCase();
     S.lang = nav.indexOf('zh') === 0 ? 'zh' : 'en';
@@ -446,10 +577,15 @@
 
   function boot() {
     initLang();
-    var tok = '';
-    try { tok = localStorage.getItem(LS_TOKEN) || ''; } catch (e) { tok = ''; }
-    S.token = tok;
-    try { var rd = localStorage.getItem(LS_DIR); if (rd) S.dir = rd; } catch (e2) { /* ignore */ }
+    // 全部走 readString：以前直接读原文会把 JSON 引号一起读进来（令牌也一样，只是被凭据库盖住了）。
+    S.token = readString(LS_TOKEN, '');
+    S.dir = cleanDir(readString(LS_DIR, ''));
+    // 自愈：把历史遗留的编码值改写成规范形式，避免下次又读出一堆引号。
+    try {
+      if (S.token && localStorage.getItem(LS_TOKEN) !== JSON.stringify(S.token)) keep(LS_TOKEN, S.token);
+      if (S.dir && localStorage.getItem(LS_DIR) !== JSON.stringify(S.dir)) keep(LS_DIR, S.dir);
+      if (S.lang && localStorage.getItem(LS_LANG) !== JSON.stringify(S.lang)) keep(LS_LANG, S.lang);
+    } catch (e) { /* ignore */ }
     var savedRepo = after(LS_REPO, null);
     if (savedRepo && savedRepo.owner) {
       S.repo = savedRepo;
@@ -457,21 +593,20 @@
     }
     api('hello').then(function (d) {
       S.env = d;
-      if (!S.dir && d && (d.projectRoot || d.workspaceRoot)) S.dir = d.projectRoot || d.workspaceRoot;
+      if (!S.dir && d && (d.projectRoot || d.workspaceRoot)) S.dir = cleanDir(d.projectRoot || d.workspaceRoot);
       render();
       // 先问宿主：令牌可能已经在凭据库里（插件重启后会自动恢复），
       // 这样即使浏览器没有存过令牌也不用重新绑定。
       api('auth-status').then(function (st) {
         if (st && st.bound) {
           applyAuth(st);
-          if (st.persisted && !tok) { /* 宿主已持久化，浏览器不必再存 */ }
           render();
           loadRepos();
           return;
         }
         if (typeof st.persisted === 'boolean') S.persisted = st.persisted;
-        if (!tok) return;
-        api('auth-set', { token: tok }).then(function (r) {
+        if (!S.token) return;
+        api('auth-set', { token: S.token }).then(function (r) {
           applyAuth(r);
           render();
           loadRepos();
@@ -517,17 +652,42 @@
 
   /* ---------- 本机文件夹选择 ---------- */
 
+  /**
+   * 主路径：内置文件浏览器。完全不依赖系统组件（只用宿主的 fs 列目录），所以永远可用。
+   * 之前这里先试宿主的原生选择器，但原生对话框在部分环境里根本弹不出来，
+   * 请求会一直挂着，界面就卡在「等待系统对话框」上了。
+   */
   function pickFolder() {
+    openPicker('');
+  }
+
+  /**
+   * 备选：宿主的原生选择器。它在宿主侧会同步等到用户操作完为止，
+   * 所以这里加一个 25 秒的客户端超时 —— 万一对话框没弹出来，界面不会永久卡住
+   * （那个请求留在后台，超时后我们不再等它）。
+   */
+  function pickNative() {
     if (S.picking) return;
     S.picking = true;
     S.error = '';
     render();
+    var settled = false;
+    var timer = setTimeout(function () {
+      if (settled) return;
+      settled = true;
+      S.picking = false;
+      S.error = t('pickTimeout');
+      render();
+    }, 25000);
     api('pick-folder').then(function (d) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       S.picking = false;
       if (d.mode === 'native') {
         render();
         if (d.path) {
-          S.dir = d.path;
+          S.dir = cleanDir(d.path);
           keep(LS_DIR, S.dir);
           toast(t('pkChosen', S.dir));
           scanNow();
@@ -539,6 +699,9 @@
       render();
       openPicker(d.message || '');
     }).catch(function (e) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       S.picking = false;
       S.error = t('pkNativeFail', String((e && e.message) || e));
       render();
@@ -587,7 +750,7 @@
 
   function chooseFolder() {
     if (!S.picker || !S.picker.path) return;
-    S.dir = S.picker.path;
+    S.dir = cleanDir(S.picker.path);
     keep(LS_DIR, S.dir);
     closePicker();
     render();
@@ -708,6 +871,12 @@
     }
 
     foot.appendChild(h('span', { class: 'ghu-grow' }));
+    foot.appendChild(h('button', {
+      class: 'ghu-btn', text: t('pkTryNative'),
+      title: t('upChooseTip'),
+      disabled: S.picking,
+      onclick: pickNative
+    }));
     foot.appendChild(h('button', { class: 'ghu-btn', text: t('pkCancel'), onclick: closePicker }));
     foot.appendChild(h('button', {
       class: 'ghu-btn ghu-primary', text: t('pkChoose'),
@@ -725,6 +894,12 @@
     if (S.scanBusy) return;
     if (!S.bound) { S.error = t('needBind'); S.tab = 'account'; render(); return; }
     if (!S.repo) { S.error = t('needRepo'); S.tab = 'repo'; render(); return; }
+    // 归一化后再用：粘贴来的路径可能带引号 / 重复分隔符 / 尾随分隔符。
+    var cleaned = cleanDir(S.dir);
+    if (cleaned !== S.dir) {
+      S.dir = cleaned;
+      toast(t('dirCleaned'));
+    }
     S.scanBusy = true;
     S.error = '';
     render();
@@ -739,11 +914,178 @@
       S.tab = 'upload';
       render();
       toast(d.prunedCount ? t('scanDonePruned', d.files.length, d.prunedCount) : t('scanDone', d.files.length));
+      // 用户是先点了「本聊天改动的文件」才触发这次扫描的：扫完接着把选择做掉。
+      if (S.pendingSessionPick) {
+        S.pendingSessionPick = false;
+        applySessionPick();
+      }
     }).catch(function (e) {
       S.scanBusy = false;
+      S.pendingSessionPick = false;
       S.error = String((e && e.message) || e);
       render();
     });
+  }
+
+  /* ---------- 按会话自动勾选 ---------- */
+
+  /* 会话里每个文件的状态 → 文案 key */
+  var MARK_KEY = {
+    written: 'markWritten', edited: 'markEdited',
+    read: 'markRead', searched: 'markSearched'
+  };
+
+  function sessionLabel(session) {
+    if (!session) return '';
+    return session.title || session.id || '';
+  }
+
+  /** 两个路径是不是同一个目录（大小写与分隔符都不敏感）。 */
+  function samePath(a, b) {
+    var na = cleanDir(String(a || '')).replace(/\\/g, '/').toLowerCase();
+    var nb = cleanDir(String(b || '')).replace(/\\/g, '/').toLowerCase();
+    return na !== '' && na === nb;
+  }
+
+  /** 文件树上的会话标记；只有当标记所依据的根和当前扫描的根一致时才可信。 */
+  function sessionMark(path) {
+    if (!S.scan || !S.sessionRoot) return undefined;
+    if (!samePath(S.scan.root, S.sessionRoot)) return undefined;
+    return S.sessionFiles[path];
+  }
+
+  /**
+   * 不需要先选文件夹：直接问宿主「这次聊天在哪个目录里干了活」。
+   * 宿主会按「活着的会话优先」挑会话，再用被写入/修改文件的最深公共目录推断项目根。
+   */
+  function detectProject(force) {
+    if (S.detectBusy) return;
+    if (S.detect && !force) return;
+    S.detectBusy = true;
+    render();
+    api('session-files', {}).then(function (d) {
+      S.detectBusy = false;
+      S.detect = d;
+      if (d && d.projectRoot) {
+        S.sessionRoot = d.projectRoot;
+        var indexRoot = {};
+        var list = d.files || [];
+        // 这里的相对路径是相对 projectRoot 的；和扫描结果的真实大小写对不上就先留着，
+        // 等真正按扫描根重取时再映射（applySessionPick 会做）。
+        for (var i = 0; i < list.length; i++) indexRoot[String(list[i].path).toLowerCase()] = list[i];
+        S.detectFiles = indexRoot;
+        // 只在输入框还空着的时候自动填 —— 不覆盖用户自己选的目录。
+        if (!S.dir) { S.dir = cleanDir(d.projectRoot); S.detectFilled = true; }
+      }
+      render();
+    }).catch(function (e) {
+      S.detectBusy = false;
+      S.detectError = String((e && e.message) || e);
+      render();
+    });
+  }
+
+  /**
+   * 点「本聊天改动的文件」：还没扫描就先扫描，扫完再勾。
+   * 勾选前按写入/修改优先，一个都没有时退一步把读取过的也勾上。
+   */
+  function pickSessionFiles() {
+    if (S.sessionBusy) return;
+    if (!S.dir) {
+      S.error = t('upPickSessionHint');
+      render();
+      detectProject(true);
+      return;
+    }
+    if (!S.scan || !samePath(S.scan.root, S.dir)) {
+      S.pendingSessionPick = true;
+      scanNow();
+      return;
+    }
+    applySessionPick();
+  }
+
+  function applySessionPick() {
+    if (S.sessionBusy) return;
+    if (!S.scan) return;
+    S.sessionBusy = true;
+    S.error = '';
+    render();
+    api('session-files', { dir: S.scan.root }).then(function (d) {
+      S.sessionBusy = false;
+      S.sessionInfo = d;
+      S.sessionRoot = d.projectRoot || S.scan.root;
+      // 大小写不敏感地映射回本次扫描到的真实路径，顺带丢掉不在项目里的文件
+      var index = {};
+      for (var q = 0; q < S.scan.files.length; q++) {
+        index[S.scan.files[q].path.toLowerCase()] = S.scan.files[q].path;
+      }
+      var map = {};
+      var list = d.files || [];
+      for (var i = 0; i < list.length; i++) {
+        var real = index[String(list[i].path).toLowerCase()];
+        if (real) map[real] = list[i].action;
+      }
+      S.sessionFiles = map;
+
+      var picked = {};
+      var n = 0;
+      var k;
+      for (k in map) if (map[k] === 'written' || map[k] === 'edited') { picked[k] = true; n++; }
+      if (!n) {
+        for (k in map) if (map[k] === 'read' || map[k] === 'searched') { picked[k] = true; n++; }
+      }
+      S.picked = picked;
+      computeStats();
+      render();
+      if (n) toast(t('upSessionPicked', sessionLabel(d.session), n));
+      else toast(d.message || t('upSessionNone'));
+    }).catch(function (e) {
+      S.sessionBusy = false;
+      S.error = String((e && e.message) || e);
+      render();
+    });
+  }
+
+  /**
+   * 还没扫描时显示的那张卡：先把「本次聊天的项目目录」摆出来，
+   * 用户不用先去资源管理器里翻文件夹。
+   */
+  function detectCard() {
+    if (S.detectBusy) {
+      return h('div', { class: 'ghu-muted', style: 'margin-top:10px;', text: t('detectBusy') });
+    }
+    if (S.detectError) {
+      return h('div', { class: 'ghu-diag', style: 'margin-top:10px;', text: t('detectFailed', S.detectError) });
+    }
+    var d = S.detect;
+    // 绝不返回 null：调用方会直接 appendChild，null 会抛 TypeError 把整个 render 打断
+    // （这正是「扫描点了没反应」的原因 —— scanNow 里 render() 在发请求之前）。
+    if (!d || !d.projectRoot) return h('div');
+    var same = samePath(d.projectRoot, S.dir);
+    var wrote = d.counts ? (d.counts.written || 0) + (d.counts.edited || 0) : 0;
+    return h('div', { class: 'ghu-card', style: 'cursor:default;margin-top:10px;' }, [
+      h('div', { style: 'font-size:12px;font-weight:600;', text: t('detectFound') }),
+      h('div', { class: 'ghu-pathbar', style: 'margin:6px 0 0;', text: d.projectRoot + (same && S.detectFilled ? t('detectOther') : '') }),
+      h('div', { class: 'ghu-muted', style: 'margin-top:6px;', text: t('detectNote', sessionLabel(d.session), wrote) }),
+      h('div', { class: 'ghu-row', style: 'margin-top:8px;' }, [
+        h('button', {
+          class: 'ghu-btn ghu-primary',
+          text: same ? t('detectScan') : t('detectUse'),
+          disabled: S.scanBusy,
+          onclick: function () {
+            S.dir = cleanDir(d.projectRoot);
+            S.detectFilled = false;
+            keep(LS_DIR, S.dir);
+            scanNow();
+          }
+        }),
+        same ? null : h('button', {
+          class: 'ghu-btn', text: t('detectIgnore'),
+          onclick: function () { S.detect = null; S.detectError = ''; render(); }
+        })
+      ])
+    ]);
   }
 
   /* ---------- 渲染 ---------- */
@@ -789,7 +1131,7 @@
         tabs.appendChild(h('button', {
           class: 'ghu-tab' + (S.tab === id ? ' ghu-on' : ''),
           text: label,
-          onclick: function () { S.tab = id; S.error = ''; render(); if (id === 'repo' && S.bound && !S.repos.length) loadRepos(); }
+          onclick: function () { S.tab = id; S.error = ''; render(); if (id === 'repo' && S.bound && !S.repos.length) loadRepos(); if (id === 'upload') detectProject(); }
         }));
       })(defs[d][0], defs[d][1]);
     }
@@ -1189,6 +1531,10 @@
           if (ev.target.checked) S.picked[f.path] = true; else delete S.picked[f.path];
           computeStats(); syncTree();
         });
+        var act = sessionMark(f.path);
+        var mk = act
+          ? h('span', { class: 'ghu-mark ghu-mark-' + act, title: t(MARK_KEY[act] || 'markRead') })
+          : null;
         out.push(h('div', {
           class: 'ghu-frow' + (f.ignored ? ' ghu-ignored' : ''),
           style: 'padding-left:' + (4 + depth * 13 + 17) + 'px',
@@ -1196,6 +1542,7 @@
         }, [
           cb2,
           h('span', { class: 'ghu-fname', text: baseName(f.path) }),
+          mk,
           h('span', { class: 'ghu-fsize', text: fmtSize(f.size) })
         ]));
       })(fs[k]);
@@ -1240,11 +1587,25 @@
     var dir = h('input', { class: 'ghu-input ghu-grow', placeholder: t('upDirPh'), value: S.dir });
     dir.addEventListener('input', function () { S.dir = dir.value; });
     dir.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') scanNow(); });
+    // 粘贴完立刻把引号 / 重复分隔符洗掉，让人一眼看到真正会被用的路径
+    dir.addEventListener('paste', function () {
+      setTimeout(function () {
+        var cleaned = cleanDir(dir.value);
+        if (cleaned !== dir.value) {
+          S.dir = cleaned;
+          dir.value = cleaned;
+          toast(t('dirCleaned'));
+        }
+      }, 0);
+    });
+    dir.addEventListener('blur', function () {
+      var cleaned = cleanDir(dir.value);
+      if (cleaned !== dir.value) { S.dir = cleaned; dir.value = cleaned; }
+    });
     var pickBtn = h('button', {
       class: 'ghu-btn',
-      text: S.picking ? t('upChoosing') : t('upChoose'),
+      text: t('upChoose'),
       title: t('upChooseTip'),
-      disabled: S.picking,
       onclick: pickFolder
     });
     var scanBtn = h('button', {
@@ -1255,7 +1616,23 @@
     body.appendChild(h('h4', { style: 'margin:14px 0 6px;font-size:12px;color:var(--dsw-alias-label-secondary,#555);', text: t('upDirHeading') }));
     body.appendChild(h('div', { class: 'ghu-row' }, [dir, pickBtn, scanBtn]));
 
+    /* 「本聊天改动的文件」这一行在扫描前后都要有：没扫过时点它会先扫描再勾选。 */
+    var sessionRow = function () {
+      return h('div', { class: 'ghu-row', style: 'margin:10px 0 8px;' }, [
+        h('button', {
+          class: 'ghu-btn', text: S.sessionBusy ? t('upSessionPicking') : t('upPickSession'),
+          title: t('upPickSessionTip'),
+          disabled: S.sessionBusy,
+          onclick: pickSessionFiles
+        }),
+        h('span', { class: 'ghu-muted ghu-grow', text: t('upPickSessionHint') })
+      ]);
+    };
+
     if (!S.scan) {
+      body.appendChild(sessionRow());
+      var dcard = detectCard();
+      if (dcard) body.appendChild(dcard);
       body.appendChild(h('p', { class: 'ghu-muted', style: 'margin-top:10px;', text: t('upScanHint') }));
       return;
     }
@@ -1270,6 +1647,9 @@
       h('button', { class: 'ghu-btn', text: t('upReset'), onclick: function () { applyDefaults(); refreshTree(); syncTree(); } })
     ]));
 
+    /* 说清「勾选」到底是什么语义：这是「更新」而不是「只传这些」 */
+    body.appendChild(h('div', { class: 'ghu-diag', style: 'margin-bottom:8px;', text: t('upSelectionNote') }));
+
     var flt = h('input', { class: 'ghu-input ghu-grow', placeholder: t('upFilterPh'), value: S.fileFilter });
     flt.addEventListener('input', function () { S.fileFilter = flt.value; refreshTree(); });
     var ign = h('input', { class: 'ghu-cb', type: 'checkbox', checked: S.showIgnored });
@@ -1277,6 +1657,19 @@
     body.appendChild(h('div', { class: 'ghu-row', style: 'margin-bottom:6px;' }, [
       flt, h('label', { class: 'ghu-switch' }, [ign, t('upShowIgnored')])
     ]));
+
+    /* 按会话自动勾选：把「这次聊天里动过的文件」一次选出来 */
+    body.appendChild(sessionRow());
+    if (S.sessionInfo) {
+      var si = S.sessionInfo;
+      var note = si.message || '';
+      if (!note && si.session) {
+        var wrote = (si.counts && (si.counts.written + si.counts.edited)) || 0;
+        note = t('noteSession', sessionLabel(si.session), wrote, si.inside || 0);
+        if (si.outside) note += t('noteSessionOutside', si.outside);
+      }
+      if (note) body.appendChild(h('div', { class: 'ghu-diag', style: 'margin-bottom:8px;', text: note }));
+    }
 
     var treeBox = h('div', { class: 'ghu-tree', id: 'ghu-tree' });
     body.appendChild(treeBox);
