@@ -1,6 +1,12 @@
 /* dsh-github-upload — 面板样式
  * 全部颜色走 DSH 主题变量（--dsw-alias-*），因此自动跟随浅色/深色主题。
- * 变量定义在 DSH 的 body 上，所以根节点必须挂在 document.body 下才能继承。 */
+ * 变量定义在 DSH 的 body 上；界面挂在 shell.overlay 槽位里，仍在 body 子树内，照常继承。 */
+
+/* shell.overlay 整层是 click-through 的（条目要自己 opt-in 指针事件），
+ * 所以容器与根节点都设为穿透，只有真正的可点区域再收回 auto。 */
+.ghu-slot-host{position:fixed;inset:0;pointer-events:none;}
+#dsh-ghu-root{pointer-events:none;}
+#dsh-ghu-fab,#dsh-ghu-panel,.ghu-toast,.ghu-backdrop{pointer-events:auto;}
 
 #dsh-ghu-root, #dsh-ghu-root * { box-sizing: border-box; }
 

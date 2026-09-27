@@ -1,6 +1,6 @@
 # dsh-github-upload
 
-A **dynamic Cordis plugin** for DeepSeek Harness: one button in the bottom-right corner that pushes a local project to GitHub — bind an account, pick or create a repository, choose which files to upload, flip a repository between public and private. All by mouse, with **zero model tokens spent**.
+A **Cordis bundle** for DeepSeek Harness: one button in the bottom-right corner that pushes a local project to GitHub — bind an account, pick or create a repository, choose which files to upload, flip a repository between public and private. All by mouse, with **zero model tokens spent**.
 
 Bilingual UI (中文 / English, switchable in the panel header). [中文说明](README.zh.md)
 
@@ -27,20 +27,22 @@ Bilingual UI (中文 / English, switchable in the panel header). [中文说明](
 
 ```
 dsh-github-upload/
+├─ index.js          Package entry: re-exports src/host.js
+├─ client.js         GENERATED ModuleLoader artifact (UI + CSS), registers into shell.overlay
 ├─ src/
-│  ├─ host.js        Host half: HTTP routes, GitHub API calls, scanning, upload job
+│  ├─ host.js        Host half: API route, GitHub calls, scanning, upload job (real ES module)
 │  ├─ client.js      Browser UI (corner button + drawer panel), bilingual catalog
 │  └─ client.css     Panel styles (all DSH theme tokens, light/dark automatic)
+├─ cordis.patch.yml  Bundle patch: inserts the plugin row
+├─ locale/           Display metadata for the Plugin Manager (zh + en)
+├─ icon.svg          Bundle icon
 ├─ build/
-│  └─ bundle.mjs     Build: syntax precheck + generate the cordis_define payload
-├─ dist/             Build output (generated)
-│  ├─ ghpush-package.json
-│  └─ host.code.txt
+│  └─ bundle.mjs     Assembles client.js from src/client.js + src/client.css
 ├─ README.md         This file (English)
 ├─ README.zh.md      中文说明
 ├─ README.i18n.yaml  Bilingual-pair consistency record (blob hashes)
 ├─ CHANGELOG.md      Update history (Chinese)
-└─ package.json
+└─ package.json      Bundle manifest (dsh.bundle.patch + dsh.client)
 ```
 
 ---
@@ -64,32 +66,32 @@ GitHub's own error messages are passed through verbatim — they are English by 
 
 ## 4. Development workflow
 
-### UI changes (no plugin restart)
-
-`client.js` / `client.css` are read from disk on **every HTTP request**, so:
+### Install
 
 ```bash
-# edit src/client.js or src/client.css, then just refresh the browser page
+npm run build          # regenerate client.js from src/ (required after any src/ edit)
 ```
 
-### Host changes
+Then install the package directory as a bundle (this installs it into the current profile and survives restart):
 
-The host half is `code.host` — it lives in the Cordis registry, not on disk, so changing it means re-activating:
-
-```bash
-npm run build         # = node build/bundle.mjs: syntax precheck + dist/ghpush-package.json
+```
+plugin_manager  action: install_bundle  target: <absolute path to this directory>
 ```
 
-Then hand `dist/ghpush-package.json` to:
+Follow the result's `application` and `warnings` fields — not server logs — to know whether it is live. `applyIndexTaps` / route registration are not needed: the Host registers one API route, and the UI arrives through the module loader.
 
-1. `cordis_define` (`plugin.kind: "existing"`, `pluginId: "ghpush-1"`, `code.host` = contents of `host.code.txt`)
-2. `cordis_run` (`mode: "update"`, with the new `packageId` returned by define)
+### Iterating
 
-> After moving the project directory you must rebuild: the hard-coded `ASSET_DIR` still points at the old path, and the build script warns about the mismatch.
+| Changed | Effective after |
+| --- | --- |
+| `src/client.js`, `src/client.css` | `npm run build`, then refresh the page (**no restart**) |
+| `src/host.js`, `index.js`, `cordis.patch.yml`, `package.json` | `install_bundle` again, then a Harness restart to load a fresh module generation |
 
-### Why the UI lives on disk
+The profile installs this package as a **link** to the working directory (`link:D:/dsh plugins/dsh-github-upload`), so the files on disk are the files that run.
 
-The first version inlined the UI source into the host source, so every one-line UI tweak meant re-defining a ~40KB payload. Reading from disk at request time makes UI iteration a page refresh.
+### Why the UI is a generated artifact
+
+Earlier versions served the UI over an HTTP route and tapped `index.html` to inject a `<script>` tag. That is no longer needed: the package declares `dsh.client` and the page's own module loader loads `client.js`, which registers a component into the `shell.overlay` slot. `src/client.js` stays a plain browser script (it imports nothing), and the build wraps it — so the UI code is unchanged while the delivery is now the supported one.
 
 ### Tests
 
@@ -144,14 +146,15 @@ Uploads go through the GitHub **Git Data API**: read branch head → create one 
 
 | Problem | Handling |
 | --- | --- |
-| The dynamic host sandbox has no `fetch` / `require` / timers | HTTPS runs in a short-lived node child spawned through `subprocess`; timeouts come from `inject: ['timer']` |
+| The plugin sandbox has no `fetch` / `require` / timers | HTTPS runs in a short-lived node child spawned through `subprocess`; timeouts come from `inject: ['timer']` |
 | Binary files cannot go through `btoa` | A hand-written byte-level base64 encoder; text files use `encoding: "utf-8"` to avoid 33% inflation |
 | A branch name containing `/` must keep literal slashes in the ref path | Split on `/`, encode each segment, re-join — otherwise it is mistaken for "branch missing" and an orphan commit is created |
 | Bound successfully but no repositories appear | `list-repos` merges account-visible repos + organization repos + a public fallback and returns per-source hit counts; an empty list gets ranked guidance plus a direct `owner/repo` input |
-| Approval prompts are disabled in this session, so a Client Cordis Package is auto-rejected | The whole UI is host-side: `webServer.register` serves routes, `webServer.tapIndex` injects the entry script |
+| `shell.overlay` is a click-through layer | The container and root opt **out** (`pointer-events: none`) and only the button, panel, toast and modal opt back **in**; otherwise the button renders but cannot be clicked |
 | The host has no `AbortController`, but the native picker demands an `AbortSignal` | The implementation only touches `aborted` / `addEventListener` / `removeEventListener`, so it gets a duck-typed signal (this plugin never aborts: closing the dialog *is* the user's answer) |
 | Ignored directories were pruned silently | Two tiers: HARD (dependency/cache) is pruned but reported by name; SOFT (build output) is listed and merely unticked by default |
-| UI assets are re-read per request | UI edits need no plugin restart; the cost is that `code.host` no longer contains the UI bytes |
+| A `JSON.stringify` write to `localStorage` read back raw | Preferences now go through `readString()`, which JSON-decodes (and tolerates legacy double-encoding) and self-heals on startup — earlier the stored quotes became part of the project path |
+| A Frontend crash silently disabled a whole tab | `npm run check` runs a headless smoke test that mounts the UI and asserts a click on Scan actually issues a request |
 
 ---
 
@@ -172,7 +175,7 @@ Uploads go through the GitHub **Git Data API**: read branch head → create one 
 - The ignore engine is a simplified `.gitignore` (comments, `!` negation, trailing `/`, `*` / `**` / `?`); unusual patterns may be inaccurate — which is why ignored files stay tickable in the UI.
 - Ignored directories come in two tiers: dependency/cache directories (`node_modules`, `.git`, `.venv`, …) are skipped **entirely** and their files never appear (the directory names are reported in the scan result); build-output directories (`dist`, `build`, `out`, `target`, …) are only **unticked by default** and remain visible and tickable.
 - The token is written to the **host credential store** (`ctx.credentials`, reference `DSH_GITHUB_UPLOAD_TOKEN` → `~/.dsh/.credentials.yaml`) so it survives plugin restarts and DSH restarts, and is also kept in browser `localStorage` when "remember" is ticked. It is **never sent to the model**.
-- A dynamic plugin is process-local: **after a DSH restart it must be defined / run again** (the token survives in the credential store, so nothing needs re-binding).
+- This is a **profile bundle**: installed with `plugin_manager install_bundle`, it applies to every session in the profile and **survives restarts** (unlike the earlier dynamic package, which had to be re-defined after each restart).
 - Chat-file detection reads the session log's `tool/call` records, so it recognizes the `write` / `edit` / `read` / `grep` / `glob` tools. Files touched only through shell commands, or by a subagent's own session, are **not** attributed to this chat.
 - Uploading builds a blob per file, so very large projects produce many API calls; the GitHub API is rate limited.
 
@@ -180,8 +183,8 @@ Uploads go through the GitHub **Git Data API**: read branch head → create one 
 
 ## 9. Troubleshooting
 
-1. **No button** → refresh the page (the entry script is injected at page load); confirm `http://127.0.0.1:<port>/dsh-gh/app.js` opens.
-2. **The button is there but the panel reports it cannot read the UI assets** → `ASSET_DIR` in `src/host.js` points at an old path; fix it or re-run `npm run build`.
+1. **No button** → refresh the page first (the client artifact is loaded by the page's module loader). Still missing? Check Settings → Plugins that `@local/dsh-github-upload` is enabled; it is a local profile bundle, not a shipped official one.
+2. **The button is visible but cannot be clicked** → `shell.overlay` is a click-through layer, so an entry must opt back into pointer events. The `.ghu-slot-host` / `#dsh-ghu-root` / `#dsh-ghu-fab` rules in `src/client.css` do exactly that — do not remove them.
 3. **Bound, but the repository list is empty** → read the "source diagnostics" and the guidance in the panel; check the token scopes first (section 7), or type `owner/repo` under "Point at a repository directly".
 4. **"Choose folder" opens the built-in browser, not a system dialog** → this is deliberate. The host's native picker can hang forever when its OS dialog cannot open (missing koffi, remote deployment), which used to freeze the button. The built-in browser only uses the host's `fs` listing and always works; the system dialog is available as an optional "Try the system dialog" button inside it, guarded by a 25-second timeout. Account → Local environment shows which backend kind is active.
 5. **"Scan" does nothing / the Upload tab looks half-drawn** → this was a frontend crash (fixed in 0.7.1) where `render()` threw before the request was sent. If it ever comes back, run `npm run check`: the headless smoke test asserts that clicking Scan actually issues a request.

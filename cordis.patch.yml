@@ -1,0 +1,7 @@
+# 插入本 bundle 的插件行 / insert this bundle's plugin row
+#
+# 行 id 与包名不同名也没关系，但保持同名最省心：Loader 按 name 解析包，
+# id 只是这一行的标识，用于 override / disabled。
+- insert:
+    - id: dsh-github-upload
+      name: '@local/dsh-github-upload'

@@ -2,6 +2,37 @@
 
 > 本文件保持中文。README 有双语版本：`README.md`（English）/ `README.zh.md`（中文）。
 
+## 1.0.0
+
+### 变更：从「动态插件」改成可安装的 **bundle**
+换了桌面环境后 `cordis_define` / `cordis_run` 不再存在，动态包也没了。改成官方支持的安装方式：
+用 `plugin_manager install_bundle` 把本目录装进当前 profile。
+
+- **宿主半边**（`src/host.js`）从「函数体」改成真正的 ES 模块：`export const inject` + `export function apply(ctx)`；
+  包根的 `index.js` 只是把它再导出一次，Loader 按包名装载的就是这个。
+- **客户端半边**改成 ModuleLoader 工件：`package.json` 声明 `dsh.client`，页面自己的模块加载器加载包根的
+  `client.js`，它把界面注册到 **`shell.overlay`** 槽位（root 作用域、框架级浮层、`replaceRisk: none`）。
+  于是不再需要 `webServer.tapIndex`，也不再需要宿主下发前端资源。
+- **界面代码本身没重写**：`src/client.js` 仍然是那个纯浏览器脚本（不 import 任何 Harness 包），
+  只改了三处挂载点 —— 不再往 `document.body` 上挂，而是暴露 `window.__DSH_GHU_MOUNT__(container)`，
+  由槽位组件把容器交进来。`build/bundle.mjs` 负责把 `src/client.js` + `src/client.css` 拼成 `client.js`。
+- 宿主只保留一个 `exact` 路由：`POST /dsh-gh/api`。
+
+### 修复
+- **`shell.overlay` 整层是 click-through 的**，条目必须自己收回指针事件 —— 否则按钮画得出来却点不动。
+  `.ghu-slot-host` / `#dsh-ghu-root` 退出指针事件，`#dsh-ghu-fab` / `#dsh-ghu-panel` / `.ghu-toast` / `.ghu-backdrop` 收回来。
+- 「本机环境」里显示的插件目录是 URL 形式（`/D:/dsh%20plugins/...`），现在解码后再显示。
+
+### 安装结果（实测）
+```
++ @local/dsh-github-upload link:D:/dsh plugins/dsh-github-upload
+{"stage":"enable","enabled":true,"changed":true,"application":"applied","warnings":[]}
+```
+装进去的是**软链**，所以磁盘上的文件就是真正在跑的文件。验证结果：
+- `POST /dsh-gh/api {"op":"hello"}` → 200；
+- `shell.overlay` 的 occupants 里出现 `{"id":"dsh-github-upload","order":20,"active":true}`；
+- **令牌没丢**：`auth-status` → `bound=true, user=ONEOne-1v1, persisted=true`，换环境后不需要重新绑定。
+
 ## 0.7.2
 
 ### 修复

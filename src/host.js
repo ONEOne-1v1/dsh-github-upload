@@ -1,27 +1,22 @@
 /**
- * dsh-github-upload — 宿主半边（Host half） / Host half of the dynamic Cordis plugin
+ * dsh-github-upload — 宿主半边（Host half） / Host half of the Cordis plugin
  *
- * 这是 Cordis 动态插件的 `code.host`：一个普通 JavaScript 函数体，最终 `return` 一个 Cordis Plugin。
+ * 这是一个普通的 ES 模块插件：`export const inject` + `export function apply(ctx)`。
+ * 包根的 index.js 只是把它再导出一次，供 Loader 按包名装载。
  * 它在 DSH 的 Node 进程里运行，负责：
- *   1. 通过 webServer 注册 /dsh-gh 前缀路由（下发前端资源 + JSON API）；
- *   2. 通过 tapIndex 把入口脚本注入到页面，得到那个右下角的按钮；
- *   3. 用 subprocess 拉起一个短命的 node 子进程做 HTTPS 请求（动态沙箱内没有 fetch）；
- *   4. 用 fs 服务扫描项目目录、读取文件内容；
- *   5. 用 directoryPicker 服务让用户在本机选文件夹；
- *   6. 用 GitHub Git Data API 把文件推成一个 commit（不依赖本机 git，也不会生成 .git）。
+ *   1. 通过 webServer 注册 /dsh-gh/api 这一个 JSON 接口（前端由客户端半边直接调用）；
+ *   2. 用 subprocess 拉起一个短命的 node 子进程做 HTTPS 请求（插件沙箱内没有 fetch）；
+ *   3. 用 fs 服务扫描项目目录、读取文件内容；
+ *   4. 用 directoryPicker 服务让用户在本机选文件夹；
+ *   5. 用 credentials 服务持久化令牌（插件重装后自动恢复，不必重新绑定）；
+ *   6. 用 sessionQuery 读会话日志：识别「这次聊天改过哪些文件」，并据此推断项目目录；
+ *   7. 用 GitHub Git Data API 把文件推成一个 commit（不依赖本机 git，也不会生成 .git）。
  *
- * 双语：前端每次请求都会带上 lang（zh / en），宿主用它挑选消息文案。
- *
- * ── 开发方式 ──────────────────────────────────────────────────────────
- * 前端资源（src/client.js、src/client.css）在**每次请求时从磁盘读取**，
- * 所以改完前端只需要刷新浏览器页面，不必重新 define / run 插件。
- *
- * 改完本文件后需要重新激活插件：运行 `node build/bundle.mjs` 生成
- * dist/ghpush-package.json，再用 cordis_define / cordis_run 载入。
+ * 界面（右下角按钮 + 面板）由包根的 client.js 提供：那是 ModuleLoader 工件，
+ * 由页面注册到 shell.overlay 槽位，import 不到本模块 —— 两边只通过 /dsh-gh/api 通信。
+ * 因此改界面只需要改 src/client.js 再跑 `npm run build`（重新生成 client.js），
+ * 不需要动这里，也不需要重启 Harness。
  */
-
-// 前端资源目录。项目移动后请修改这里，或重新运行 build/bundle.mjs。
-const ASSET_DIR = 'D:/dsh plugins/dsh-github-upload/src'
 
 const API_BASE = 'https://api.github.com'
 const MAX_FILE_BYTES = 26214400 // 单文件 25MB
@@ -211,11 +206,10 @@ async function run() {
 }
 `
 
-return {
-  // timer 是硬依赖：raceTimeout 用它给网络请求加超时。
-  inject: ['timer'],
+// timer 是硬依赖：raceTimeout 用它给网络请求加超时。
+export const inject = ['timer']
 
-  apply(ctx) {
+export function apply(ctx) {
     const fsx = ctx.get('fs')
     const sp = ctx.get('subprocess')
     const wsvc = ctx.get('webServer')
@@ -332,15 +326,9 @@ return {
       } catch (e) { return '' }
     }
 
-    /** 读取前端资源；每次请求都重新读，方便边改边刷新。 */
-    async function readAsset(name) {
-      try {
-        const t = await fsx.resolve(ASSET_DIR + '/' + name)
-        return await fsx.readText(t)
-      } catch (e) {
-        console.error('[dsh-github-upload] 读取前端资源失败：' + ASSET_DIR + '/' + name)
-        return null
-      }
+    /** 插件包目录（客户端半边打包在包根的 client.js 里），只用于 hello 里回报，便于排障。 */
+    function assetDir() {
+      try { return new URL('.', import.meta.url).pathname } catch (e) { return '' }
     }
 
     // ── 子进程 / 网络 ─────────────────────────────────────────────
@@ -1525,7 +1513,7 @@ return {
           workspaceRoot: wsRoot,
           fsRoot: fRoot,
           nodePath: nodePath,
-          assetDir: ASSET_DIR,
+          assetDir: assetDir(),
           picker: { kind: pickerCapability() ? pickerKind : 'none' },
         }
       }
@@ -1777,47 +1765,26 @@ return {
 
     ctx.effect(function () {
       return wsvc.register({
-        kind: 'prefix',
-        path: ROUTE_PREFIX,
+        kind: 'exact',
+        path: ROUTE_PREFIX + '/api',
         handler: async function (req, res) {
           try {
-            let path = String(req.url || '')
-            const q = path.indexOf('?')
-            if (q !== -1) path = path.slice(0, q)
-
-            if (req.method === 'GET' && path === ROUTE_PREFIX + '/app.js') {
-              const text = await readAsset('client.js')
-              res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'no-store' })
-              res.end(text === null
-                ? 'console.error("[dsh-github-upload] 无法读取前端资源：' + ASSET_DIR + '/client.js");'
-                : text)
+            if (req.method !== 'POST') {
+              res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
+              res.end('method not allowed')
               return
             }
-
-            if (req.method === 'GET' && path === ROUTE_PREFIX + '/app.css') {
-              const text = await readAsset('client.css')
-              res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-store' })
-              res.end(text === null ? '' : text)
-              return
+            const body = await readBody(req)
+            let args = {}
+            try { args = JSON.parse(body || '{}') } catch (e) { args = {} }
+            let payload
+            try {
+              payload = { ok: true, data: await dispatch(args) }
+            } catch (err) {
+              payload = { ok: false, error: String(err && err.message ? err.message : err) }
             }
-
-            if (req.method === 'POST' && path === ROUTE_PREFIX + '/api') {
-              const body = await readBody(req)
-              let args = {}
-              try { args = JSON.parse(body || '{}') } catch (e) { args = {} }
-              let payload
-              try {
-                payload = { ok: true, data: await dispatch(args) }
-              } catch (err) {
-                payload = { ok: false, error: String(err && err.message ? err.message : err) }
-              }
-              res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-              res.end(JSON.stringify(payload))
-              return
-            }
-
-            res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-            res.end('not found')
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+            res.end(JSON.stringify(payload))
           } catch (err) {
             console.error('[dsh-github-upload] route error', err)
             try {
@@ -1827,19 +1794,7 @@ return {
           }
         },
       })
-    }, 'dsh-github-upload: http routes')
+    }, 'dsh-github-upload: api route')
 
-    ctx.effect(function () {
-      return wsvc.tapIndex(function (html) {
-        if (typeof html !== 'string') return html
-        if (html.indexOf(ROUTE_PREFIX + '/app.js') !== -1) return html
-        const inject = '<link rel="stylesheet" href="' + ROUTE_PREFIX + '/app.css">'
-          + '<script src="' + ROUTE_PREFIX + '/app.js" defer></script>'
-        if (html.indexOf('</body>') === -1) return html + inject
-        return html.replace('</body>', function () { return inject + '</body>' })
-      })
-    }, 'dsh-github-upload: index tap')
-
-    console.log('[dsh-github-upload] mounted / 已挂载: ' + ROUTE_PREFIX + ' routes ready, assets at ' + ASSET_DIR)
-  },
+    console.log('[dsh-github-upload] mounted / 已挂载: ' + ROUTE_PREFIX + '/api')
 }

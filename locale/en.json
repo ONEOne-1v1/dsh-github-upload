@@ -1,0 +1,4 @@
+{
+  "title": "GitHub Upload",
+  "description": "Adds a button in the lower-right corner: bind a GitHub account, pick or create a repository, detect the project directory this chat is working in, choose which version to upload, then push in one click — no local git and no model tokens required."
+}

@@ -1,15 +1,41 @@
 {
-  "name": "dsh-github-upload",
-  "version": "0.7.2",
+  "name": "@local/dsh-github-upload",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "DeepSeek Harness 动态 Cordis 插件：在界面上加一个按钮，把本地项目一键推送到 GitHub（中英双语）",
-  "description_en": "A dynamic Cordis plugin for DeepSeek Harness: one button that uploads a local project to GitHub (bilingual zh/en)",
+  "description": "One-button GitHub upload for DeepSeek Harness (bilingual zh/en)",
+  "description_zh": "在 DeepSeek Harness 界面上加一个按钮，把项目一键推送到 GitHub（中英双语）",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "src/",
+    "locale/",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
   "scripts": {
     "build": "node build/bundle.mjs",
     "test": "node scripts/test-render.mjs && node scripts/test-cleandir.mjs",
     "test:render": "node scripts/test-render.mjs",
-    "check": "node --check src/client.js && node build/bundle.mjs && node scripts/test-render.mjs && node scripts/test-cleandir.mjs"
+    "check": "node build/bundle.mjs && node scripts/test-render.mjs && node scripts/test-cleandir.mjs"
   },
   "keywords": [
     "dsh",

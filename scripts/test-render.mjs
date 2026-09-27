@@ -234,12 +234,22 @@ const step = (name, fn) => {
   console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}`)
 }
 
-// 1) 挂载（IIFE 里 start() 会立即 mount，随后异步 boot()）
+// 1) 挂载。客户端脚本不再自己往 document.body 上挂：它只暴露
+//    window.__DSH_GHU_MOUNT__，由槽位组件把容器交进来。这里模拟槽位组件。
 step('mount the panel', () => {
   // eslint-disable-next-line no-new-func
   new Function(source)()
+  if (typeof windowStub.__DSH_GHU_MOUNT__ !== 'function') {
+    throw new Error('客户端没有暴露 window.__DSH_GHU_MOUNT__')
+  }
+  const host = new El('div')          // 模拟 shell.overlay 提供的容器
+  body.appendChild(host)
+  windowStub.__DSH_GHU_MOUNT__(host)
   if (!byId('dsh-ghu-fab')) throw new Error('FAB was not mounted')
   if (!byId('dsh-ghu-panel')) throw new Error('panel was not mounted')
+  if (!host.contains(byId('dsh-ghu-root'))) {
+    throw new Error('UI was not mounted into the slot container')
+  }
 })
 
 // 让 boot()/hello 的 promise 链跑完
