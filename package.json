@@ -33,13 +33,14 @@
   },
   "scripts": {
     "build": "node build/bundle.mjs",
-    "test": "node scripts/test-render.mjs && node scripts/test-cleandir.mjs && node scripts/test-internals.mjs && node scripts/test-blobsha.mjs && node scripts/test-picker.mjs && node scripts/test-artifact.mjs",
+    "test": "node scripts/test-render.mjs && node scripts/test-cleandir.mjs && node scripts/test-internals.mjs && node scripts/test-blobsha.mjs && node scripts/test-picker.mjs && node scripts/test-artifact.mjs && node scripts/test-vispicker.mjs",
     "test:render": "node scripts/test-render.mjs",
     "test:internals": "node scripts/test-internals.mjs",
     "test:blobsha": "node scripts/test-blobsha.mjs",
     "test:picker": "node scripts/test-picker.mjs",
-    "check": "node build/bundle.mjs && node scripts/test-render.mjs && node scripts/test-cleandir.mjs && node scripts/test-internals.mjs && node scripts/test-blobsha.mjs && node scripts/test-picker.mjs && node scripts/test-artifact.mjs",
-    "test:artifact": "node scripts/test-artifact.mjs"
+    "test:artifact": "node scripts/test-artifact.mjs",
+    "test:vispicker": "node scripts/test-vispicker.mjs",
+    "check": "node build/bundle.mjs && node scripts/test-render.mjs && node scripts/test-cleandir.mjs && node scripts/test-internals.mjs && node scripts/test-blobsha.mjs && node scripts/test-picker.mjs && node scripts/test-artifact.mjs && node scripts/test-vispicker.mjs"
   },
   "keywords": [
     "dsh",

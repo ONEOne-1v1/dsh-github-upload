@@ -13,7 +13,10 @@ const here = dirname(fileURLToPath(import.meta.url))
 //   NEGATIVE_CONTROL=drop-null-guard node scripts/test-render.mjs   ← 必须失败
 let source = readFileSync(process.env.CLIENT_JS || join(here, '..', 'src', 'client.js'), 'utf8')
 // CSS 里也有必须守住的约束（面板不能贴到窗口右上角），所以两个文件都要看。
+// 先**剥掉注释**：注释里会提到 `#dsh-ghu-fab` 这类选择器名，用正则按 `选择器{...}` 抓规则时
+// 会被它们污染（曾经因此把 .ghu-acct img 的规则误判成 FAB 状态规则）。
 let css = readFileSync(process.env.CLIENT_CSS || join(here, '..', 'src', 'client.css'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
 if (process.env.NEGATIVE_CONTROL === 'drop-null-guard') {
   // 把两处修复都改回原样：detectCard 返回 null，且调用方不再判空。
   // 只改一处是抓不到的 —— 两处都是独立生效的防线，这正是它们存在的意义。
@@ -180,7 +183,16 @@ function reply(op) {
   const data = {
     hello: { projectRoot: 'D:/proj', workspaceRoot: 'D:/proj', nodePath: 'node', assetDir: 'D:/a', picker: { kind: 'native' }, sessionQuery: true },
     'auth-status': { bound: true, user: { login: 'tester', name: 'T', avatar: '', url: '' }, persisted: true, token: { kind: 'classic', scopes: 'repo' }, hint: '' },
-    'list-repos': { repos: [], total: 0, diag: [], token: { kind: 'classic', scopes: 'repo' }, hint: '' },
+    'list-repos': {
+      // 至少给一个仓库：设置页要求已选仓库，可见性选择器的断言依赖它
+      repos: [{
+        name: 'r', fullName: 'o/r', owner: 'o', private: false, archived: false,
+        fork: false, description: '', homepage: '', defaultBranch: 'main',
+        url: 'https://github.com/o/r', updatedAt: '', pushedAt: '',
+        hasIssues: true, hasWiki: false, topics: [],
+      }],
+      total: 1, diag: [], token: { kind: 'classic', scopes: 'repo' }, hint: '',
+    },
     'list-branches': { branches: ['main'] },
     'session-files': {
       projectRoot: 'D:/proj', rootSource: 'files',
@@ -199,6 +211,14 @@ function reply(op) {
       files: [{ path: 'a.txt', size: 1, ignored: false, reason: '' }],
     },
     ping: { status: 200, zen: 'ok', node: 'node' },
+    // 设置页会先拉一次仓库详情，拿到之后才渲染表单（含可见性选择器）
+    'get-repo': {
+      repo: {
+        name: 'r', fullName: 'o/r', description: '', homepage: '', private: false,
+        archived: false, hasIssues: true, hasWiki: false, topics: [],
+        url: 'https://github.com/o/r',
+      },
+    },
     'list-dirs': { path: 'D:/', home: 'D:/', crumbs: [], entries: [], roots: [], canCreate: false },
   }[op]
   if (data === undefined) return { ok: false, error: 'unexpected op in smoke test: ' + op }
@@ -255,6 +275,18 @@ function fire(el, type, event = {}) {
     catch (e) { failures.push(`${type} on <${el.tagName}> threw: ${e && e.message}`) }
   }
 }
+/**
+ * 让已排队的 promise 回调跑几轮。
+ *
+ * 宿主响应都是 `Promise.resolve(...)`，其 `.then` 在微任务里执行；顶层 `await settle()`
+ * 就能让这些回调推进到位。
+ *
+ * ⚠️ 只能用在**顶层** `await`：不要写成 `step('x', async () => { ... await settle() ... })`
+ * 然后在后面紧跟同步断言 —— 顶层不会等那个 promise，后面的步骤会在数据到位前就跑，
+ * 而那些断言看起来"失败"其实只是跑早了。需要中间态的界面（例如设置页先拉一次仓库详情）
+ * 建议抽成独立单测，别塞进这条同步链路。
+ */
+const settle = async (rounds = 4) => { for (let i = 0; i < rounds; i++) await new Promise((r) => setImmediate(r)) }
 function find(root, predicate) {
   if (predicate(root)) return root
   if (!Array.isArray(root.children)) return null
@@ -267,15 +299,31 @@ function find(root, predicate) {
 const byId = (id) => find(body, (n) => n.attrs && n.attrs.id === id)
 const byText = (text) => find(body, (n) => n.tagName === 'BUTTON' && n.textContent === text)
 
+/**
+ * 跑一条断言。
+ *
+ * 同步步骤立即执行；**异步步骤返回一个 promise**，必须由调用处 `await`。
+ * 不要改成"登记起来最后统一跑"：那样会打乱步骤顺序（测试之间共享界面状态）。
+ * 这里显式支持 async，是因为曾经漏掉过：同步版 `try { fn() }` 会在第一个 await 处
+ * 悄悄断掉后续断言，而该步骤照样打印 ok —— 一个会骗人的测试。
+ */
 const step = (name, fn) => {
+  if (fn.constructor && fn.constructor.name === 'AsyncFunction') {
+    const before = failures.length
+    return Promise.resolve()
+      .then(fn)
+      .catch((e) => { failures.push(`${name}: ${e && e.message}`) })
+      .then(() => {
+        console.log(`${failures.length === before ? 'ok  ' : 'FAIL'}  ${name}`)
+      })
+  }
   const before = failures.length
   try { fn() } catch (e) { failures.push(`${name}: ${e && e.message}`) }
-  const ok = failures.length === before
-  console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}`)
+  console.log(`${failures.length === before ? 'ok  ' : 'FAIL'}  ${name}`)
 }
 
 // 1) 挂载：客户端脚本只暴露 window.__DSH_GHU_MOUNT__，由槽位组件把容器交进来；这里模拟槽位组件。
-step('mount the panel', () => {
+await step('mount the panel', () => {
   // eslint-disable-next-line no-new-func
   new Function(source)()
   if (typeof windowStub.__DSH_GHU_MOUNT__ !== 'function') {
@@ -293,7 +341,7 @@ step('mount the panel', () => {
 
 // 桌面端窗口的关闭/退出键在窗口右上角，所以面板头部不能放任何可点的东西，
 // 面板本身也不能贴到窗口右边缘/顶边缘。
-step('no interactive control sits in the panel top-right corner', () => {
+await step('no interactive control sits in the panel top-right corner', () => {
   const head = find(body, n => n.className === 'ghu-head')
   const ctl = find(body, n => n.className === 'ghu-panelctl')
   const close = byId('ghu-close')
@@ -307,7 +355,7 @@ step('no interactive control sits in the panel top-right corner', () => {
   if (lang && !ctl.contains(lang)) throw new Error('language switch is not inside the bottom control bar')
 })
 
-step('panel geometry keeps the window corner clear (CSS)', () => {
+await step('panel geometry keeps the window corner clear (CSS)', () => {
   const m = /#dsh-ghu-panel\{([^}]*)\}/.exec(css)
   if (!m) throw new Error('#dsh-ghu-panel rule not found in src/client.css')
   const rule = m[1]
@@ -347,7 +395,7 @@ step('panel geometry keeps the window corner clear (CSS)', () => {
   }
 })
 
-step('the entry button is a logo-only fixed-size circle (CSS contract)', () => {
+await step('the entry button is a logo-only fixed-size circle (CSS contract)', () => {
   // 防的回归：按钮尺寸一旦随状态变化（按文案自适应宽度 / hover 展开成胶囊），拖到界面边上就会
   // 「超出视口 → 被夹回 → 指针脱离 → 收起」来回抖 —— 所以尺寸必须恒定、全圆角、只有 logo。
   const cab = /#dsh-ghu-fab\{([^}]*)\}/.exec(css)
@@ -444,13 +492,13 @@ step('the entry button is a logo-only fixed-size circle (CSS contract)', () => {
 await new Promise(r => process.nextTick(r))
 await new Promise(r => setImmediate(r))
 
-step('open the panel (FAB pointerdown + pointerup)', () => {
+await step('open the panel (FAB pointerdown + pointerup)', () => {
   const fab = byId('dsh-ghu-fab')
   fire(fab, 'pointerdown', { button: 0 })
   fire(fab, 'pointerup', { button: 0 })
 })
 
-step('boot finished (hello + auth-status + list-repos issued)', () => {
+await step('boot finished (hello + auth-status + list-repos issued)', () => {
   const ops = requests.map(r => r.op)
   for (const need of ['hello', 'auth-status', 'list-repos']) {
     if (!ops.includes(need)) throw new Error(`no ${need} request; got: ${ops.join(',')}`)
@@ -459,7 +507,7 @@ step('boot finished (hello + auth-status + list-repos issued)', () => {
 
 // 注意顺序：这两条会消耗一次「拖动」和一次「收起」，必须排在面板已经打开之后，
 // 否则后面的用例看到的是一个被拖走 / 被收起的按钮。
-step('the FAB cannot be parked in the title-bar strip', () => {
+await step('the FAB cannot be parked in the title-bar strip', () => {
   // 入口按钮可拖动：不论拖到哪、或上一次存了什么坐标，落点都必须回到下半屏。
   const fab = byId('dsh-ghu-fab')
   fire(fab, 'pointerdown', { button: 0, clientX: 1200, clientY: 850, pointerId: 1 })
@@ -479,7 +527,7 @@ step('the FAB cannot be parked in the title-bar strip', () => {
   }
 })
 
-step('the minimize control collapses and the FAB reopens', () => {
+await step('the minimize control collapses and the FAB reopens', () => {
   const min = byId('ghu-min')
   if (!min) throw new Error('minimize button not found')
   const head = find(body, n => n.className === 'ghu-head')
@@ -513,13 +561,13 @@ step('the minimize control collapses and the FAB reopens', () => {
   }
 })
 
-step('switch to the Upload tab', () => {
+await step('switch to the Upload tab', () => {
   const tab = byText('上传')
   if (!tab) throw new Error('upload tab button not found')
   fire(tab, 'click')
 })
 
-step('the default directory carries no JSON quotes (localStorage round-trip)', () => {
+await step('the default directory carries no JSON quotes (localStorage round-trip)', () => {
   const input = find(body, n => n.tagName === 'INPUT' && n.attrs && n.attrs.placeholder === '项目目录绝对路径')
   if (!input) throw new Error('directory input not found')
   if (String(input.value).indexOf('"') !== -1) {
@@ -528,11 +576,11 @@ step('the default directory carries no JSON quotes (localStorage round-trip)', (
   if (input.value !== 'D:/proj') throw new Error('unexpected default directory: ' + JSON.stringify(input.value))
 })
 
-step('the saved language was actually applied', () => {
+await step('the saved language was actually applied', () => {
   if (!byText('账号')) throw new Error('Chinese tab labels missing — saved lang was not read back')
 })
 
-step('render the upload tab before detection resolves (the regression)', () => {
+await step('render the upload tab before detection resolves (the regression)', () => {
   // 再渲染一次：此时 detect 还没回来，detectCard() 会走到「没有检测结果」的分支。
   const tab = byText('上传')
   fire(tab, 'click')
@@ -541,7 +589,7 @@ step('render the upload tab before detection resolves (the regression)', () => {
 
 await new Promise(r => setImmediate(r))
 
-step('click Scan → a scan request must actually be sent', () => {
+await step('click Scan → a scan request must actually be sent', () => {
   const before = requests.filter(r => r.op === 'scan').length
   const btn = byText('扫描')
   if (!btn) throw new Error('scan button not found')
@@ -552,11 +600,11 @@ step('click Scan → a scan request must actually be sent', () => {
 
 await new Promise(r => setImmediate(r))
 
-step('scan result rendered without throwing', () => {
+await step('scan result rendered without throwing', () => {
   if (!byText('全选')) throw new Error('post-scan selection row not rendered')
 })
 
-step('click "未上传的改动" after scanning', () => {
+await step('click "未上传的改动" after scanning', () => {
   const btn = byText('未上传的改动')
   if (!btn) throw new Error('pending-changes button not found')
   fire(btn, 'click')
@@ -564,14 +612,14 @@ step('click "未上传的改动" after scanning', () => {
 
 await new Promise(r => setImmediate(r))
 
-step('the pending-changes comparison was requested (content-based, not session-based)', () => {
+await step('the pending-changes comparison was requested (content-based, not session-based)', () => {
   const req = requests.filter(r => r.op === 'pending-files')
   if (!req.length) throw new Error('no pending-files request')
 })
 
 await new Promise(r => setImmediate(r))
 
-step('the comparison carries the target repo, branch and directory', () => {
+await step('the comparison carries the target repo, branch and directory', () => {
   // 比对必须带上目标与分支，否则宿主只能猜（这是把"选仓库/选分支"和"比对"接起来的断言）
   const bodies = requestBodies.filter(b => b.op === 'pending-files')
   const last = bodies[bodies.length - 1]
@@ -583,7 +631,7 @@ step('the comparison carries the target repo, branch and directory', () => {
 
 // 6) 有宿主客户端服务（uiWorkspace）时，选择器里必须有「系统对话框」入口，
 //    且它真的调用 pickDirectory —— 原生选择器能去任何位置，是本插件自己列举的兜底。
-step('with the host service available, the picker offers the native system dialog', async () => {
+await step('with the host service available, the picker offers the native system dialog', async () => {
   let picked = 0
   globalThis.window.__DSH_GHU_HOST__ = {
     pickDirectory: () => { picked++; return Promise.resolve('D:/proj/src') },
@@ -611,7 +659,7 @@ step('with the host service available, the picker offers the native system dialo
 // 7) 宿主只在 native 后端下工作时（`listDirectory` 会拒绝并说明缺少 browse 能力），
 //    「选择文件夹」必须**直接用系统对话框**，而不是把一个列不出任何东西的空浏览器丢给用户。
 //    这是真实发生过的故障：宿主只服务 native，内置浏览器里什么都选不了。
-step('a native-only host goes straight to the system dialog', async () => {
+await step('a native-only host goes straight to the system dialog', async () => {
   let picked = 0
   let listed = 0
   globalThis.window.__DSH_GHU_HOST__ = {
@@ -638,6 +686,27 @@ step('a native-only host goes straight to the system dialog', async () => {
   // 不能把用户留在一个空的浏览器里
   if (byText('系统对话框')) throw new Error('the built-in browser stayed open on a native-only host')
   delete globalThis.window.__DSH_GHU_HOST__
+})
+
+await step('every border-radius:50% circle pins corner-shape:round (CSS invariant)', () => {
+  /* 全局不变量，比逐个元素加断言可靠：DSH 主题有一条全局规则把所有圆角变成超椭圆，
+   * 会把 50% 的正圆压成圆角方块；只有 Chrome/Edge 139+ 才触发，所以极易漏掉。
+   * 已经漏过三次（FAB、状态点、头像），因此这里对**整张样式表**做检查：
+   * 任何一条用了 border-radius:50% 的规则，都必须同时写 corner-shape:round。 */
+  const rules = []
+  const re = /([^{}]+)\{([^{}]*)\}/g
+  let m
+  while ((m = re.exec(css))) rules.push({ body: m[2] })
+  const circles = rules.filter((r) => /border-radius:\s*50%/.test(r.body))
+  if (circles.length < 3) {
+    throw new Error('expected at least 3 circular rules in the stylesheet, found ' + circles.length)
+  }
+  for (const r of circles) {
+    if (!/corner-shape:\s*round/.test(r.body)) {
+      throw new Error('a border-radius:50% rule is missing corner-shape:round: ' + r.body.slice(0, 80))
+    }
+  }
+  return circles.length + ' circle rules all pinned'
 })
 
 console.log('')

@@ -289,12 +289,40 @@ body[data-ds-dark-theme] .ghu-dot{box-shadow:0 0 0 1.5px var(--dsw-alias-bg-laye
   border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));
 }
 .ghu-acct{display:flex;align-items:center;gap:10px;}
-.ghu-acct img{width:36px;height:36px;border-radius:50%;border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));}
+/* 头像必须显式 corner-shape:round —— 主题的全局 superellipse 会把 50% 圆压成圆角方块
+ * （同 #dsh-ghu-fab 与 .ghu-dot，见文件开头那段的说明） */
+.ghu-acct img{width:36px;height:36px;border-radius:50%;corner-shape:round;border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));}
 
 .ghu-kv{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:3px 0;}
 .ghu-kv > span:first-child{color:var(--dsw-alias-label-secondary,#5b5b5b);}
 .ghu-switch{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dsw-alias-label-secondary,#5b5b5b);cursor:pointer;user-select:none;}
 .ghu-switch:hover{color:var(--dsw-alias-label-primary,#111);}
+
+/* ---------- 可见性选择器（公开 / 私有）----------
+ * 用分段控件而不是勾选框：二元互斥的状态必须"两个选项都可见 + 当前项高亮"，
+ * 否则用户得先读一行说明才知道现在是哪种。 */
+.ghu-visrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 2px;}
+.ghu-segbox{
+  display:inline-flex;flex:0 0 auto;padding:2px;gap:2px;
+  border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));
+  border-radius:10px;corner-shape:round;
+  background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base,#f5f5f5));
+}
+.ghu-seg{
+  appearance:none;border:0;background:transparent;cursor:pointer;
+  font:500 12px/1 var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-secondary,#5b5b5b);
+  padding:6px 14px;border-radius:8px;corner-shape:round;
+  transition:background .12s ease,color .12s ease;
+}
+.ghu-seg:hover{color:var(--dsw-alias-label-primary,#111);}
+.ghu-seg-on{
+  background:var(--dsw-alias-bg-layer-1,var(--dsw-alias-bg-base,#fff));
+  color:var(--dsw-alias-label-primary,#111);
+  box-shadow:var(--dsw-elevation-soft,0 1px 2px rgba(0,0,0,.12));
+}
+#dsh-ghu-root .ghu-seg:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2563eb);outline-offset:2px;}
+.ghu-visnote{font-size:12px;}
 
 /* ---------- 文件树 ---------- */
 .ghu-tree{
@@ -318,8 +346,8 @@ body[data-ds-dark-theme] .ghu-dot{box-shadow:0 0 0 1.5px var(--dsw-alias-bg-laye
 .ghu-cb{flex:0 0 auto;margin:0;width:14px;height:14px;accent-color:var(--dsw-alias-brand-primary,#2563eb);cursor:pointer;}
 #dsh-ghu-root .ghu-cb:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#2563eb);outline-offset:2px;}
 
-/* 会话标记：本聊天里动过的文件 */
-.ghu-mark{flex:0 0 auto;width:7px;height:7px;border-radius:50%;display:inline-block;}
+/* 会话标记：本聊天里动过的文件（同样要显式 corner-shape:round，否则是圆角小方块） */
+.ghu-mark{flex:0 0 auto;width:7px;height:7px;border-radius:50%;corner-shape:round;display:inline-block;}
 .ghu-mark-written{background:var(--dsw-alias-state-success-primary,#22c55e);}
 .ghu-mark-edited{background:var(--dsw-alias-state-business-primary,#2563eb);}
 .ghu-mark-read{background:var(--dsw-alias-label-tertiary,#999);opacity:.55;}

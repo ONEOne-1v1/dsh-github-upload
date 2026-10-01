@@ -158,7 +158,11 @@
     repoCollapse: ['收起新建', 'Cancel'],
     repoNamePh: ['仓库名，例如 my-project', 'Repository name, e.g. my-project'],
     repoDescPh: ['描述（可选）', 'Description (optional)'],
-    repoPrivateNew: ['创建为私有仓库', 'Create as a private repository'],
+    repoVisibility: ['可见性', 'Visibility'],
+    repoPublic: ['公开', 'Public'],
+    repoPrivate: ['私有', 'Private'],
+    repoPublicHint: ['任何人都能看到这个仓库', 'Anyone can see this repository'],
+    repoPrivateHint: ['只有你能看到这个仓库', 'Only you can see this repository'],
     repoCreate: ['创建仓库', 'Create repository'],
     repoCreating: ['创建中…', 'Creating…'],
     repoCreated: ['仓库已创建：{1}', 'Repository created: {1}'],
@@ -286,8 +290,8 @@
     setHomepage: ['主页 URL', 'Homepage URL'],
     setTopics: ['话题标签（逗号分隔）', 'Topics (comma separated)'],
     setVisibility: ['可见性与开关', 'Visibility and switches'],
-    setPrivate: ['私有仓库（仅自己和协作者可见）', 'Private repository (only you and collaborators)'],
-    setPublic: ['公开仓库（任何人可见）', 'Public repository (anyone can see it)'],
+    setVisPicker: ['仓库可见性', 'Repository visibility'],
+    setSwitches: ['其他开关', 'Other switches'],
     setIssues: ['启用 Issues', 'Enable Issues'],
     setWiki: ['启用 Wiki', 'Enable Wiki'],
     setArchive: ['归档仓库（归档后只读）', 'Archive repository (read-only afterwards)'],
@@ -398,6 +402,10 @@
         else if (k === 'value') e.value = v;
         else if (k === 'checked') e.checked = !!v;
         else if (k === 'disabled') e.disabled = !!v;
+        // aria-checked 之类用 setAttribute；这里显式支持几个无障碍属性，
+        // 免得它们被当成普通属性塞进 DOM 却读不出状态。
+        else if (k === 'role' || k === 'aria-checked' || k === 'aria-label' || k === 'aria-labelledby' ||
+                 k === 'aria-describedby' || k === 'tabindex' || k === 'title') e.setAttribute(k, v);
         else if (k.length > 2 && k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
         else e.setAttribute(k, v);
       }
@@ -411,6 +419,44 @@
       }
     }
     return e;
+  }
+
+  /**
+   * 可见性选择器（分段控件）：公开 / 私有。
+   *
+   * 为什么不用单选 checkbox：用 checkbox 表达"公开/私密"这种二元互斥状态，
+   * 勾选态和语义态是对不上的 —— 不勾选时显示"公开"、勾选后显示"私密"，
+   * 人必须先读那行文字才知道当前到底是哪种。分段控件把**两个选项都摆出来**、
+   * 当前项高亮，状态一眼可见，也符合"二选一"的交互语义。
+   *
+   * @param current 当前是否私有
+   * @param onPick  用户选择后回调（收到新的 private 布尔值）
+   */
+  function visPicker(current, onPick) {
+    function seg(isPrivate, label, cls) {
+      var on = current === isPrivate;
+      return h('button', {
+        class: 'ghu-seg' + (on ? ' ghu-seg-on' : '') + (cls ? ' ' + cls : ''),
+        type: 'button',
+        role: 'radio',
+        'aria-checked': on ? 'true' : 'false',
+        'aria-label': label,
+        text: label,
+        onclick: function () { if (current !== isPrivate) onPick(isPrivate); }
+      });
+    }
+    return h('div', { class: 'ghu-segbox', role: 'radiogroup', 'aria-label': t('repoVisibility') }, [
+      seg(false, t('repoPublic')),
+      seg(true, t('repoPrivate'))
+    ]);
+  }
+
+  /** 可见性选择器 + 一行说明当前选择意味着什么（说明跟着选择走，不再是按钮文字本身）。 */
+  function visRow(current, onPick) {
+    return h('div', { class: 'ghu-visrow' }, [
+      visPicker(current, onPick),
+      h('span', { class: 'ghu-muted ghu-visnote', text: current ? t('repoPrivateHint') : t('repoPublicHint') })
+    ]);
   }
 
   function link(href, text) {
@@ -1688,8 +1734,6 @@
       nm.addEventListener('input', function () { S.newName = nm.value; });
       var ds = h('input', { class: 'ghu-input', placeholder: t('repoDescPh'), value: S.newDesc });
       ds.addEventListener('input', function () { S.newDesc = ds.value; });
-      var pv = h('input', { class: 'ghu-cb', type: 'checkbox', checked: S.newPrivate });
-      pv.addEventListener('change', function () { S.newPrivate = pv.checked; });
       var createBtn = h('button', { class: 'ghu-btn ghu-primary', text: t('repoCreate'), onclick: function () {
         createBtn.disabled = true; createBtn.textContent = t('repoCreating');
         guard(api('create-repo', { name: S.newName, private: S.newPrivate, description: S.newDesc }).then(function (d) {
@@ -1712,7 +1756,8 @@
       } });
       body.appendChild(h('div', { class: 'ghu-card', style: 'cursor:default;' }, [
         nm, h('div', { style: 'height:6px;' }), ds,
-        h('label', { class: 'ghu-switch', style: 'margin-top:8px;' }, [pv, t('repoPrivateNew')]),
+        h('div', { class: 'ghu-lbl', style: 'margin-top:12px;', text: t('repoVisibility') }),
+        visRow(S.newPrivate, function (v) { S.newPrivate = v; render(); }),
         h('div', { style: 'margin-top:10px;' }, [createBtn])
       ]));
     }
@@ -2197,6 +2242,17 @@
 
   /* ---------- 仓库信息 ---------- */
 
+  /** 把宿主返回的仓库详情填进编辑表单。抽成函数，便于单独测试/复用。 */
+  function fillEditForm(repo) {
+    S.edit = {
+      name: repo.name, description: repo.description, homepage: repo.homepage,
+      private: repo.private, archived: repo.archived, hasIssues: repo.hasIssues,
+      hasWiki: repo.hasWiki, topics: (repo.topics || []).join(', '),
+      url: repo.url, fullName: repo.fullName
+    };
+    return S.edit;
+  }
+
   function renderSettings(body, foot) {
     if (!S.bound) { body.appendChild(h('p', { class: 'ghu-muted', text: t('needBind') })); return; }
     if (!S.repo) { body.appendChild(h('p', { class: 'ghu-muted', text: t('needRepo') })); return; }
@@ -2205,12 +2261,7 @@
     if (!S.edit) {
       body.appendChild(h('p', { class: 'ghu-muted', text: t('setLoading') }));
       api('get-repo', { owner: S.repo.owner, repo: S.repo.name }).then(function (d) {
-        S.edit = {
-          name: d.repo.name, description: d.repo.description, homepage: d.repo.homepage,
-          private: d.repo.private, archived: d.repo.archived, hasIssues: d.repo.hasIssues,
-          hasWiki: d.repo.hasWiki, topics: (d.repo.topics || []).join(', '),
-          url: d.repo.url, fullName: d.repo.fullName
-        };
+        fillEditForm(d.repo);
         render();
       }).catch(function (e) { S.error = String((e && e.message) || e); render(); });
       return;
@@ -2242,9 +2293,12 @@
     tp.addEventListener('input', function () { f.topics = tp.value; });
     body.appendChild(tp);
 
-    body.appendChild(h('label', { class: 'ghu-lbl', text: t('setVisibility') }));
-    var pv = h('input', { class: 'ghu-cb', type: 'checkbox', checked: f.private });
-    pv.addEventListener('change', function () { f.private = pv.checked; render(); });
+    // 可见性是二选一：用分段选择器而不是勾选框。
+    // 勾选框的勾选态和"公开/私密"语义对不上（不勾选显示公开、勾选显示私密），
+    // 用户必须先读旁边那行文字才知道当前状态；分段控件把两个选项都摆出来、当前项高亮。
+    body.appendChild(h('label', { class: 'ghu-lbl', text: t('setVisPicker') }));
+    body.appendChild(visRow(f.private, function (v) { f.private = v; render(); }));
+    body.appendChild(h('h4', { style: 'margin:16px 0 6px;font-size:12px;color:var(--dsw-alias-label-secondary,#555);', text: t('setSwitches') }));
     var ai = h('input', { class: 'ghu-cb', type: 'checkbox', checked: f.hasIssues });
     ai.addEventListener('change', function () { f.hasIssues = ai.checked; });
     var aw = h('input', { class: 'ghu-cb', type: 'checkbox', checked: f.hasWiki });
@@ -2252,7 +2306,6 @@
     var aa = h('input', { class: 'ghu-cb', type: 'checkbox', checked: f.archived });
     aa.addEventListener('change', function () { f.archived = aa.checked; });
     body.appendChild(h('div', { style: 'display:flex;flex-direction:column;gap:8px;' }, [
-      h('label', { class: 'ghu-switch' }, [pv, f.private ? t('setPrivate') : t('setPublic')]),
       h('label', { class: 'ghu-switch' }, [ai, t('setIssues')]),
       h('label', { class: 'ghu-switch' }, [aw, t('setWiki')]),
       h('label', { class: 'ghu-switch' }, [aa, t('setArchive')])
