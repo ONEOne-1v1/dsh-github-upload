@@ -1,22 +1,22 @@
 /**
- * dsh-github-upload — 宿主半边（Host half） / Host half of the Cordis plugin
+ * dsh-github-upload — 宿主半边（Host half）
  *
- * 这是一个普通的 ES 模块插件：`export const inject` + `export function apply(ctx)`。
+ * 一个普通的 ES 模块插件：`export const inject` + `export function apply(ctx)`；
  * 包根的 index.js 只是把它再导出一次，供 Loader 按包名装载。
- * 它在 DSH 的 Node 进程里运行，负责：
+ * 它跑在 DSH 的 Node 进程里，负责：
  *   1. 通过 webServer 注册 /dsh-gh/api 这一个 JSON 接口（前端由客户端半边直接调用）；
- *   2. 用 subprocess 拉起一个短命的 node 子进程做 HTTPS 请求（插件沙箱内没有 fetch）；
- *   3. 用 fs 服务扫描项目目录、读取文件内容；
- *   4. 用 directoryPicker 服务让用户在本机选文件夹；
- *   5. 用 credentials 服务持久化令牌（插件重装后自动恢复，不必重新绑定）；
- *   6. 用 sessionQuery 读会话日志：识别「这次聊天改过哪些文件」，并据此推断项目目录；
- *   7. 用 GitHub Git Data API 把文件推成一个 commit（不依赖本机 git，也不会生成 .git）。
+ *   2. 用 subprocess 拉起短命 node 子进程做 HTTPS 请求（插件沙箱内没有 fetch / require）；
+ *   3. 用 fs 服务扫描项目目录、读取文件内容，用 directoryPicker 让用户选文件夹；
+ *   4. 用 credentials 持久化令牌（插件重装后自动恢复），用 sessionQuery 读会话日志推断项目目录；
+ *   5. 用 GitHub Git Data API 把文件推成一个 commit（不依赖本机 git，也不会生成 .git）。
  *
  * 界面（右下角按钮 + 面板）由包根的 client.js 提供：那是 ModuleLoader 工件，
- * 由页面注册到 shell.overlay 槽位，import 不到本模块 —— 两边只通过 /dsh-gh/api 通信。
- * 因此改界面只需要改 src/client.js 再跑 `npm run build`（重新生成 client.js），
- * 不需要动这里，也不需要重启 Harness。
+ * 由页面注册到 shell.overlay 槽位，**import 不到本模块** —— 两边只通过 /dsh-gh/api 通信。
+ * 因此改界面只需要改 src/client.js 再跑 `npm run build`（重新生成 client.js），不需要动这里。
  */
+
+import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 
 const API_BASE = 'https://api.github.com'
 const MAX_FILE_BYTES = 26214400 // 单文件 25MB
@@ -24,7 +24,44 @@ const MAX_SCAN_FILES = 20000
 const ROUTE_PREFIX = '/dsh-gh'
 
 /**
- * 双向文案表 / bilingual message table：每条 [中文, English]。
+ * 启动诊断（**默认关闭**）。
+ *
+ * 只在 `DSH_GHU_DIAG=1` 时启用，用来排查「插件显示已加载、路由却不存在」这类静默失败：
+ * 模块被加载时写一行，之后 apply() 的每一步也各写一行。关闭时完全不碰文件系统。
+ * 输出到 `DSH_GHU_DIAG_FILE`，未指定则用系统临时目录 —— 不写死任何本机路径。
+ * 任何失败都必须吞掉：诊断绝不能害得插件启动不了。
+ */
+const DIAG_ON = (() => {
+  try { return process.env.DSH_GHU_DIAG === '1' } catch (e) { return false }
+})()
+const DIAG_FILE = (() => {
+  if (!DIAG_ON) return ''
+  try {
+    const forced = String(process.env.DSH_GHU_DIAG_FILE || '').trim()
+    if (forced) return forced
+    const tmp = String(process.env.TEMP || process.env.TMPDIR || process.env.TMP || '/tmp')
+    return tmp.replace(/[\\/]+$/, '') + '/dsh-github-upload-diag.jsonl'
+  } catch (e) { return '' }
+})()
+const DIAG_STAMP = 'host'
+/**
+ * 同步 fs：诊断用，尽力而为。`fsMod` 取自 createRequire，失败则为 null，
+ * 而 diag() 会把异常吞掉 —— 所以文件写入只是附赠，进程内记录才是权威。
+ */
+let fsMod = null
+try { fsMod = createRequire(import.meta.url)('node:fs') } catch (e) { fsMod = null }
+
+function stampBoot() {
+  if (!DIAG_ON) return
+  const line = new Date().toISOString() + '  host.js loaded  stamp=' + DIAG_STAMP +
+    '  fsMod=' + (fsMod ? 'ok' : 'NULL') + '  pid=' + process.pid
+  try { if (fsMod && DIAG_FILE) fsMod.appendFileSync(DIAG_FILE, line + '\n') } catch (e) { /* 附赠 */ }
+  try { console.log('[dsh-github-upload] boot ' + line.trim()) } catch (e2) { /* ignore */ }
+}
+stampBoot()
+
+/**
+ * 双向文案表：每条 [中文, English]。
  * {1} / {2} 是位置占位符（用 split/join 替换，避免正则转义问题）。
  * 只放「用户会看到」的文本；GitHub 自己的报错原样透传。
  */
@@ -55,6 +92,9 @@ const M = {
   dirMissing: ['目录不存在：{1}', 'Directory does not exist: {1}'],
   dirNotDir: ['不是目录：{1}', 'Not a directory: {1}'],
   dirUnreadable: ['目录不可读：{1}', 'Directory is not readable: {1}'],
+  // 起点目录列不动时，自动改到能用的目录（例如 D:/ 根列不出来，但项目目录可以）
+  pickFallback: ['原来的位置（{1}）列不出来，已自动切到 {2}；上面的盘符按钮可以换到别处。',
+    'Could not list {1}, so this opened at {2} instead; use the drive buttons above to go elsewhere.'],
   mkdirNoParent: ['缺少父目录', 'Missing parent directory.'],
   mkdirBadName: ['请输入合法的文件夹名', 'Enter a valid folder name.'],
   mkdirSep: ['文件夹名不能包含路径分隔符', 'A folder name cannot contain a path separator.'],
@@ -63,14 +103,14 @@ const M = {
   pickerNone: ['宿主没有目录选择服务，已切换为内置文件浏览器',
     'No host directory-picker service is available; using the built-in browser instead.'],
 
-  // 扫描忽略原因 / scan ignore reasons
+  // 扫描忽略原因
   igDep: ['内置忽略（依赖/缓存）：{1}', 'built-in ignore (dependency/cache): {1}'],
   igBuild: ['内置忽略（构建产物）：{1}', 'built-in ignore (build output): {1}'],
   igGitignore: ['.gitignore 忽略', 'ignored by .gitignore'],
   igBuiltin: ['内置忽略：{1}', 'built-in ignore: {1}'],
   igTooBig: ['超过 25MB 上限（{1} 字节）', 'over the 25MB limit ({1} bytes)'],
 
-  // 上传任务日志 / upload job log
+  // 上传任务日志
   logTarget: ['目标仓库 {1}，分支 {2}', 'Target repository {1}, branch {2}'],
   logHead: ['远程分支已存在 head={1}', 'Remote branch exists, head={1}'],
   logNewBranch: ['远程分支尚不存在，将新建分支 {1}', 'Remote branch does not exist; creating {1}'],
@@ -78,7 +118,7 @@ const M = {
   logPrune: ['将删除远程多余的 {1} 个文件', 'Will delete {1} extra file(s) from the remote branch'],
   logBranch: ['分支 {1} 已更新 -> {2}', 'Branch {1} updated -> {2}'],
 
-  // 仓库来源统计 / repository source diagnostics
+  // 仓库来源统计
   diagMine: ['账号可见仓库：新增 {1} 个', 'Repositories visible to the account: {1} new'],
   diagMineFail: ['账号可见仓库：失败 —— {1}', 'Repositories visible to the account: failed — {1}'],
   diagOrgNone: ['所属组织：0 个（或令牌缺少 read:org 权限）',
@@ -90,7 +130,7 @@ const M = {
   diagPublic: ['公开仓库兜底：新增 {1} 个', 'Public repositories fallback: {1} new'],
   diagPublicFail: ['公开仓库兜底：读取失败 —— {1}', 'Public repositories fallback: failed — {1}'],
 
-  // 令牌权限提示 / token scope hints
+  // 令牌权限提示
   hintClassicNone: ['classic 令牌没有任何 scope，只能读公开信息，看不到仓库列表。',
     'This classic token has no scopes, so it can only read public metadata and cannot list repositories.'],
   hintClassicNoRepo: ['classic 令牌缺少 repo / public_repo 权限，只能看到公开仓库。',
@@ -101,7 +141,7 @@ const M = {
   hintFine: ['fine-grained 令牌只能访问创建令牌时被授权的仓库；若要看到全部仓库，请在令牌设置里选择 All repositories。',
     'A fine-grained token only sees the repositories it was granted; choose "All repositories" in the token settings to see everything.'],
 
-  // 空仓库初始化 / empty-repository bootstrapping
+  // 空仓库初始化
   seedMessage: ['由 DeepSeek Harness 初始化仓库', 'Initialize repository from DeepSeek Harness'],
   logSeeded: ['空仓库：已用 {1} 创建首个提交（{2}）',
     'Empty repository: created the first commit from {1} ({2})'],
@@ -112,7 +152,7 @@ const M = {
   logBranchOff: ['分支 {1} 尚不存在，将从 {2} 分出',
     'Branch {1} does not exist yet; branching it off {2}'],
 
-  // 会话文件识别 / session file detection
+  // 会话文件识别
   sessionUnavailable: ['宿主没有会话查询服务，无法识别聊天中改动的文件',
     'The host exposes no session-query service, so files touched in the chat cannot be detected.'],
   sessionNone: ['没有找到任何会话记录', 'No session records were found.'],
@@ -133,7 +173,7 @@ function tr(lang, key, a, b, c) {
 }
 
 /**
- * 在子 node 进程里执行的网络助手。 / Network helper executed inside a short-lived node child.
+ * 在子 node 进程里执行的网络助手。
  * 动态插件沙箱里 fetch / require 都被禁用，所以这里把「一批 HTTP 请求」用 stdin 传进去，
  * 子进程按并发度执行，再把结果数组从 stdout 吐回来。
  * 入口参数：{ requests: [{url, method, headers, body}], concurrency }
@@ -206,24 +246,55 @@ async function run() {
 }
 `
 
-// timer 是硬依赖：raceTimeout 用它给网络请求加超时。
-export const inject = ['timer']
+/**
+ * 依赖声明。**必须把用到的服务全部写在这里**，再用 `ctx.<name>` 取用。
+ *
+ * 在 DSH 0.2.0-rc.2 的桌面 profile 里，`ctx.get('fs')` / `ctx.get('webServer')`
+ * 对这个插件的上下文全部返回 undefined（连 `webServer` 也是），
+ * 于是 `apply()` 在第一段自检就 `return` 了 —— 插件在列表里显示 `active`，
+ * 却**从来没注册过路由**，前端每次请求都落到兜底路由拿 405（表现为「绑定失败：no response」）。
+ * 声明成 inject 之后由加载器保证依赖就绪，`ctx.webServer` 一定拿得到。
+ */
+export const inject = ['timer', 'fs', 'subprocess', 'webServer']
 
 export function apply(ctx) {
-    const fsx = ctx.get('fs')
-    const sp = ctx.get('subprocess')
-    const wsvc = ctx.get('webServer')
-    const spol = ctx.get('sandboxPolicy')
-    // 可选服务：宿主自带的目录选择器。native=弹系统文件夹对话框，browse=给列表原语自己画浏览器。
-    const dp = ctx.get('directoryPicker')
-    // 可选服务：宿主凭据库。用来把 GitHub 令牌持久化，免得插件重启后又要重新绑定。
-    const creds = ctx.get('credentials')
-    // 可选服务：会话查询。用来识别「这次聊天里改过哪些文件」。
-    const sessionQuery = ctx.get('sessionQuery')
+    // 探针：把启动过程摊开写进文件 —— 中间任何一步静默抛错都会造成「进程说已挂载、路由却不存在」的假象。
+    // diag() 是同步 + 绝对路径 + 零依赖，不会自己被拖死。
+    const TAG = '[dsh-github-upload]'
+    diag('apply:enter')
+    // 硬依赖：已在上面的 inject 里声明，加载器保证可用，因此直接用 ctx.xxx。
+    const fsx = ctx.fs
+    const sp = ctx.subprocess
+    const wsvc = ctx.webServer
+    /* 可选服务：**一律惰性获取**。
+     *
+     * 教训（真踩过两次）：`apply()` 跑在启动早期，而提供这些服务的插件可能**后加载**。
+     * 在 apply 里 `ctx.get(...)` 取一次并长期使用，会永久拿到 undefined，
+     * 相应能力就被静默丢掉 —— 表现是"怎么点都没反应"，且不报错。
+     * 目录选择器（directoryPicker）正是这样丢掉过一次：后端在插件列表的最后加载，
+     * 结果「弹系统文件夹对话框」永远不可用。所以这里只保留"每次用的时候再问一次"。
+     */
+    const opt = {}
+    function svc(name) {
+      if (opt[name] !== undefined) return opt[name]
+      let v
+      try { v = ctx.get(name) } catch (e) { v = undefined }
+      if (v !== undefined && v !== null) opt[name] = v   // 拿到了就缓存；拿不到下次再问
+      return v
+    }
+    const spol = svc('sandboxPolicy')
+    diag('apply:services',
+      'ctx.fs=' + (fsx !== undefined) + ' ctx.subprocess=' + (sp !== undefined) +
+      ' ctx.webServer=' + (wsvc !== undefined) + ' register=' + typeof (wsvc && wsvc.register) +
+      ' | get: sandboxPolicy=' + (spol !== undefined) +
+      ' credentials=' + (svc('credentials') !== undefined) +
+      ' sessionQuery=' + (svc('sessionQuery') !== undefined))
     if (fsx === undefined || sp === undefined || wsvc === undefined) {
-      console.error('[dsh-github-upload] 缺少 fs / subprocess / webServer 服务，插件未激活')
+      diag('apply:ABORT', '硬依赖缺失：fs=' + (fsx !== undefined) + ' subprocess=' + (sp !== undefined) + ' webServer=' + (wsvc !== undefined))
+      console.error(TAG + ' 缺少 fs / subprocess / webServer 服务，插件未激活')
       return
     }
+    diag('apply:services-ok')
 
     const B64CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
     // 用字符码代替字面量转义序列：源码里不出现反斜杠，把它塞进 JSON 载荷时就不会被二次转义。
@@ -231,7 +302,6 @@ export function apply(ctx) {
     const CR = String.fromCharCode(13)
     const REGEX_SPECIAL = '.+^$()[]{}|' + BS
 
-    /** 语言归一化：只认 en，其余都是 zh。 */
     function langOf(args) {
       return args && args.lang === 'en' ? 'en' : 'zh'
     }
@@ -247,22 +317,34 @@ export function apply(ctx) {
 
     // ── 令牌持久化 ────────────────────────────────────────────────
     //
-    // 动态插件的宿主半边每次重新激活都会换一个全新的闭包，内存里的令牌就没了；
-    // 之前用户每次都要重新绑定（GitHub 又只显示一次令牌，只好再造一个）。
-    // 这里把令牌写进宿主的凭据库（credentials 服务），重启后自动恢复。
+    // 动态插件的宿主半边每次重新激活都会换一个全新的闭包，内存里的令牌会丢，
+    // 所以把令牌写进宿主的凭据库（credentials 服务），重启后自动恢复。
     const TOKEN_REF = 'DSH_GITHUB_UPLOAD_TOKEN'
-    let tokenWritable = false
+    /**
+     * 凭据库的「写入能力」不是一个布尔值。`describe(ref)` 回的是
+     * `{ configured, source, writable }`，而 `writable:false` 的含义是
+     * **「有个只读来源遮蔽了这个引用」**（继承的进程环境 > .credentials.yaml > .env），
+     * 不是「文件不可写」：令牌可能早就落在 .credentials.yaml 里，只是被环境变量覆盖了解析结果。
+     * 所以这里把原始判定拆开记：source（env / file）+ writable，供 UI 说人话。
+     */
+    let tokenPersist = { source: '', writable: false, inStore: false }
     let tokenRestored = false
 
-    /** 从凭据库读回令牌；顺带记录「能否写入」，供 UI 提示用。 */
+    /** 从凭据库读回令牌；顺带记录它来自哪一层、能否写入，供 UI 提示用。 */
     async function loadStoredToken() {
+      const creds = svc('credentials')
       if (creds === undefined) return ''
       try {
         const info = await creds.describe(TOKEN_REF)
-        tokenWritable = info !== undefined && info.writable === true
-      } catch (e) {
-        tokenWritable = false
-      }
+        if (info !== undefined) {
+          tokenPersist = {
+            source: String(info.source || ''),
+            writable: info.writable === true,
+            // 「文件里有」= 来源是 file，或虽然被 env 遮蔽但值也在文件里（这里只按来源判断）
+            inStore: info.source === 'file' || info.writable === true,
+          }
+        }
+      } catch (e) { /* 保持上一次判定 */ }
       try {
         const resolved = await creds.resolve(TOKEN_REF)
         return resolved && resolved.value ? String(resolved.value) : ''
@@ -280,25 +362,47 @@ export function apply(ctx) {
       if (stored) token = stored
     }
 
+    /**
+     * 持久化令牌。**先真正尝试写，再根据结果说话** ——
+     * 无论缓存的可写标志如何都试一次，写失败才算失败，
+     * 并把真实原因（哪个只读来源遮蔽了它）回报给 UI。
+     */
     async function persistToken(value) {
-      if (creds === undefined) return false
+      const creds = svc('credentials')
+      if (creds === undefined) return { ok: false, reason: 'no-service' }
       try {
-        if (!tokenWritable) {
-          const info = await creds.describe(TOKEN_REF)
-          tokenWritable = info !== undefined && info.writable === true
-        }
-        if (!tokenWritable) return false
         await creds.set(TOKEN_REF, value)
-        return true
+        tokenPersist = { source: 'file', writable: true, inStore: true }
+        return { ok: true, reason: 'file' }
       } catch (e) {
-        console.error('[dsh-github-upload] 写入凭据库失败', e)
-        return false
+        // 常见原因：环境变量或 .env 遮蔽了这个引用（服务会拒绝写入）。
+        const msg = String(e && e.message ? e.message : e)
+        console.error('[dsh-github-upload] 写入凭据库失败：', msg)
+        try {
+          const info = await creds.describe(TOKEN_REF)
+          tokenPersist = {
+            source: String((info && info.source) || ''),
+            writable: !!(info && info.writable),
+            inStore: !!(info && (info.source === 'file' || info.writable)),
+          }
+        } catch (e2) { /* 保持原值 */ }
+        return { ok: false, reason: tokenPersist.source === 'env' ? 'env-shadowed' : 'write-failed', message: msg }
       }
     }
 
+    /**
+     * 解除绑定时顺手清掉文件里的令牌。同样**先真正尝试**再说话：
+     * 被只读来源遮蔽时 `unset` 会拒绝（服务语义如此），那就不动它，也不报错。
+     */
     async function forgetToken() {
-      if (creds === undefined || !tokenWritable) return
-      try { await creds.unset(TOKEN_REF) } catch (e) { /* ignore */ }
+      const creds = svc('credentials')
+      if (creds === undefined) return
+      try {
+        await creds.unset(TOKEN_REF)
+        tokenPersist = { source: '', writable: true, inStore: false }
+      } catch (e) {
+        console.error('[dsh-github-upload] 清除凭据库里的令牌失败（可能被只读来源遮蔽）：', String(e && e.message ? e.message : e))
+      }
     }
 
     // ── 路径工具 ──────────────────────────────────────────────────
@@ -836,21 +940,40 @@ export function apply(ctx) {
     let pickerCap = null
     let pickerKind = 'none'
 
-    /** capability 对象在服务生命周期内稳定，可以安全缓存。 */
+    /**
+     * 取目录选择器能力。capability 对象在服务生命周期内稳定，拿到后可以缓存。
+     *
+     * ⚠️ 服务本身**必须每次惰性获取**：`ctx.get('directoryPicker')` 在 apply() 那一刻
+     * 可能还没注册（后端插件后加载），取一次就永久是 undefined，
+     * 于是「弹系统文件夹对话框」的能力被静默丢掉，用户怎么点都没反应。
+     * 只有"确认拿到能力"或"确认拿到服务但能力不认"时才缓存结果。
+     */
+    function pickerService() {
+      try {
+        if (typeof dp !== 'undefined' && dp) return dp
+        return ctx.get('directoryPicker')
+      } catch (e) { return undefined }
+    }
+
     function pickerCapability() {
       if (pickerCap !== null) return pickerCap
+      const svc = pickerService()
+      if (!svc || typeof svc.capability !== 'function') {
+        // 服务还没就绪：**不缓存**这个否定结论，下次调用再问一遍
+        pickerKind = 'none'
+        return false
+      }
       try {
-        if (dp !== undefined && typeof dp.capability === 'function') {
-          const cap = dp.capability()
-          if (cap && (cap.kind === 'native' || cap.kind === 'browse')) {
-            pickerCap = cap
-            pickerKind = cap.kind
-            return cap
-          }
+        const cap = svc.capability()
+        if (cap && (cap.kind === 'native' || cap.kind === 'browse')) {
+          pickerCap = cap
+          pickerKind = cap.kind
+          return cap
         }
       } catch (e) {
         console.error('[dsh-github-upload] 读取 directoryPicker 能力失败', e)
       }
+      // 服务在、但能力形状不认识：这是稳定事实，可以缓存
       pickerCap = false
       pickerKind = 'none'
       return false
@@ -859,7 +982,7 @@ export function apply(ctx) {
     /**
      * 原生选择器需要一个 AbortSignal，但动态沙箱里没有 AbortController。
      * 实现只用到 aborted / addEventListener / removeEventListener，所以给个鸭子类型即可
-     * —— 我们从不主动中止：对话框关闭就是用户的选择。
+     * —— 从不主动中止：对话框关闭就是用户的选择。
      */
     function inertSignal() {
       return {
@@ -934,21 +1057,100 @@ export function apply(ctx) {
       }
     }
 
-    /** 没有 browse 能力时的兜底：直接用 fs 列出子目录，并自己拼面包屑。 */
+    /**
+     * 统一路径分隔符为 `/`。
+     *
+     * 为什么必须做：宿主的 `fsx.processPath()` 在 Windows 上返回**反斜杠**形式
+     * （`D:\dsh plugins\x`），而菜单 / 面包屑 / 子项路径一律用 `/` 拼（`abs + '/' + name`）。
+     * 否则同一个响应里 `path` 是反斜杠、`entries[].path` 变成"反斜杠 + 正斜杠"的混合体，
+     * 会让任何基于字符串比较的地方（去重、判断是不是同一目录）出错。
+     * 前端本来写的就是 `/`，所以这里统一成 `/`。
+     */
+    function toSlashes(p) {
+      return String(p || '').replace(/\\/g, '/')
+    }
+
+    /**
+     * 同一个根目录的另一种合法写法：`D:/` ⇄ `D:\`。
+     * 只处理"盘符根 + 分隔符"这一种情况，不做别的猜测 ——
+     * 目的是在宿主 fs 服务对某一种写法挑剔时，留一次重试的机会。
+     */
+    function alternateRootForm(p) {
+      const s = String(p || '')
+      if (/^[A-Za-z]:[\\/]$/.test(s)) {
+        const useBackslash = s.charAt(2) === '/'
+        return s.slice(0, 2) + (useBackslash ? BS : '/')
+      }
+      return ''
+    }
+
+    /**
+     * 没有 browse 能力时的兜底：直接用 fs 列出一层子目录，并自己拼面包屑。
+     *
+     * **逐项容错**：Windows 上 `D:\System Volume Information`、`D:\WindowsApps` 这类目录
+     * 会直接 `permission denied`。因此逐个探测，读不了的标记 `unreadable` 并**照常返回列表**，
+     * 由界面显示成不可进入的条目 —— 一个目录读不了不能让整个列表抛错。
+     */
     async function fsListing(pathArg, lang) {
       const base = String(pathArg || '').trim() || await baseCwd()
       const target = await fsx.resolve(base)
       const info = await fsx.stat(target)
       if (!info || info.type !== 'directory') throw new Error(tr(lang, 'dirUnreadable', base))
-      const abs = fsx.processPath(target)
-      const children = await fsx.listDir(target)
-      const entries = []
-      for (let i = 0; i < children.length; i++) {
-        if (children[i].type !== 'directory') continue
-        const name = String(children[i].name)
-        entries.push({ name: name, path: abs + '/' + name, hidden: name.charAt(0) === '.' })
+      let abs = toSlashes(base)
+      let children = []
+      try {
+        const read = await fsx.listDir(target)
+        abs = toSlashes(fsx.processPath(target))
+        children = Array.isArray(read) ? read : []
+      } catch (e) {
+        const first = String(e && e.message ? e.message : e)
+        // 换一种写法再试一次：`D:/` 与 `D:\` 在宿主 fs 服务里未必等价，
+        // 而 Windows 上这两种写法都是合法的根目录表示。只在这两种之间切换，不做别的猜测。
+        const alt = alternateRootForm(base)
+        if (alt) {
+          try {
+            const t2 = await fsx.resolve(alt)
+            const read2 = await fsx.listDir(t2)
+            abs = toSlashes(fsx.processPath(t2))
+            children = Array.isArray(read2) ? read2 : []
+            diag('list-dirs:root-form-alternate', base + ' -> ' + alt)
+          } catch (e2) {
+            diag('list-dirs:both-root-forms-failed', base + ' :: ' + first + ' :: ' + String(e2 && e2.message ? e2.message : e2))
+            throw new Error(tr(lang, 'dirUnreadable', base + '（' + first + '）'))
+          }
+        } else {
+          // 连这一层自己都读不了（例如点进 System Volume Information）→ 这才是真错误
+          throw new Error(tr(lang, 'dirUnreadable', base + '（' + first + '）'))
+        }
       }
-      entries.sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1 })
+
+      const dirEntries = []
+      for (let i = 0; i < children.length; i++) {
+        const c = children[i]
+        if (c && c.type === 'directory') dirEntries.push(c)
+      }
+      // 并发探测每个子目录：能 stat 通的就是可进入的，报错的标记为 unreadable。
+      const probed = await Promise.all(dirEntries.map(async function (c) {
+        const name = String(c.name)
+        const path = abs + '/' + name
+        let ok = true
+        let reason = ''
+        try {
+          const st = await fsx.stat(await fsx.resolve(path))
+          if (!st || st.type !== 'directory') ok = false
+        } catch (e) {
+          ok = false
+          reason = String(e && e.message ? e.message : e)
+        }
+        return { name: name, path: path, hidden: name.charAt(0) === '.', unreadable: !ok, reason: ok ? '' : reason }
+      }))
+
+      const entries = probed
+      const blocked = entries.filter(function (e) { return e.unreadable })
+      entries.sort(function (a, b) {
+        if (a.unreadable !== b.unreadable) return a.unreadable ? 1 : -1
+        return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1
+      })
 
       const segs = splitPath(abs)
       const crumbs = []
@@ -962,15 +1164,130 @@ export function apply(ctx) {
           crumbs.push({ name: segs[i], path: acc })
         }
       }
-      return { path: abs, home: await baseCwd(), crumbs: crumbs, entries: entries, truncated: false }
+      return {
+        path: abs,
+        home: await baseCwd(),
+        crumbs: crumbs,
+        entries: entries,
+        truncated: false,
+        blockedCount: blocked.length,
+        blockedNames: blocked.slice(0, 5).map(function (e) { return e.name }),
+      }
     }
 
-    /** 统一入口：拿一层目录列表。 */
+    /**
+     * 统一入口：拿一层目录列表。
+     *
+     * 这里必须容错两层：
+     *   · 宿主的 `directoryPicker`（browse 后端）自己会抛错 —— 例如列 `D:\` 时它内部撞上
+     *     `System Volume Information` 的 permission denied（本机实测）。它抛错也得能列，
+     *     所以失败就**退回用 fs 列**（`fsListing` 已经逐项容错）；
+     *   · `fsListing` 只有在"当前这一层自己读不了"时才抛错，那种情况照旧报给用户。
+     */
     async function listDirectories(pathArg, lang) {
       const cap = pickerCapability()
-      if (cap && cap.kind === 'browse') return trimListing(await cap.list(pathArg || undefined))
-      return await fsListing(pathArg, lang)
+      diag('list-dirs:enter', 'path=' + String(pathArg) + ' picker=' + pickerKind + ' cap=' + (cap ? cap.kind : 'none'))
+      if (cap && cap.kind === 'browse') {
+        try {
+          const listing = trimListing(await cap.list(pathArg || undefined))
+          // 宿主列表可能不带 unreadable 标记；统一补上，界面才能一致地处理受限目录
+          const entries = Array.isArray(listing.entries) ? listing.entries : []
+          for (let i = 0; i < entries.length; i++) {
+            if (entries[i].unreadable === undefined) entries[i].unreadable = false
+          }
+          diag('list-dirs:picker-ok', 'path=' + String(pathArg) + ' entries=' + entries.length)
+          return listing
+        } catch (e) {
+          // 宿主选择器失败（权限、后端异常…）→ 用自己的 fs 列，别让整个"选择文件夹"不可用
+          diag('list-dirs:picker-FAILED', 'path=' + String(pathArg) + ' :: ' + String(e && e.message ? e.message : e))
+          console.error('[dsh-github-upload] directoryPicker.list 失败，改用 fs 兜底：', String(e && e.message ? e.message : e))
+          try {
+            const fallback = await fsListing(pathArg, lang)
+            fallback.fallbackFrom = 'directoryPicker'
+            fallback.fallbackReason = String(e && e.message ? e.message : e)
+            diag('list-dirs:fs-fallback-ok', 'path=' + String(pathArg) + ' entries=' + (fallback.entries || []).length)
+            return fallback
+          } catch (e2) {
+            // 连 fs 也读不了这一层 → 这才是真的不可读。
+            // 两个错误都要记下来：宿主的失败原因 + fs 失败的原因，否则没法定位到底卡在哪。
+            diag('list-dirs:fs-fallback-FAILED', 'path=' + String(pathArg) +
+              ' :: picker=' + String(e && e.message ? e.message : e) +
+              ' :: fs=' + String(e2 && e2.stack ? e2.stack : e2))
+            throw new Error(tr(lang, 'dirUnreadable', String(pathArg || '') +
+              '（宿主选择器：' + String(e && e.message ? e.message : e) +
+              '；本机文件系统：' + String(e2 && e2.message ? e2.message : e2) + '）'))
+          }
+        }
+      }
+      try {
+        const r = await fsListing(pathArg, lang)
+        diag('list-dirs:fs-ok', 'path=' + String(pathArg) + ' entries=' + (r.entries || []).length)
+        return r
+      } catch (e) {
+        diag('list-dirs:fs-FAILED', 'path=' + String(pathArg) + ' :: ' + String(e && e.stack ? e.stack : e))
+        throw e
+      }
     }
+
+    /**
+     * 列一层目录，**失败也要能让人走回去**。
+     *
+     * DSH 的 fs 服务**拒绝列盘符根目录**（Windows 上 `D:/` 会报
+     * `cannot list "D:\System Volume Information": permission denied`），
+     * 但其下的**子目录是能列的** —— 而根目录恰是用户最可能看到的起点。
+     *
+     * 所以：
+     *   · `landing=true`（界面自动落到某个起点）时，如果这个起点列不动，**自动改到能列的目录**
+     *     （优先项目目录/工作区），并把这件事写在 `fallbackNote` 里 —— 用户拿到的是可用的界面，
+     *     而不是一张死页；
+     *   · `landing=false`（用户主动点进某个目录）时，如实返回 `error` + 导航出口。
+     */
+    async function listDirectoriesSafe(pathArg, lang, landing, hint) {
+      try {
+        return await listDirectories(pathArg, lang)
+      } catch (e) {
+        return await recoverListing(e, pathArg, lang, landing, hint)
+      }
+    }
+
+    async function recoverListing(err, pathArg, lang, landing, hint) {
+      const msg = String(err && err.message ? err.message : err)
+      diag('list-dirs:safe-catch', 'path=' + String(pathArg) + ' landing=' + (landing === true) + ' :: ' + msg)
+      const base = { path: String(pathArg || ''), home: '', crumbs: [], entries: [], truncated: false }
+
+      if (landing === true) {
+        // 起点列不动 → 换成能列的目录，别让用户面对一张死页
+        const candidates = []
+        if (hint) candidates.push(String(hint))
+        try { candidates.push(await baseCwd()) } catch (e2) { /* ignore */ }
+        for (let i = 0; i < candidates.length; i++) {
+          const c = candidates[i].trim()
+          if (!c || c === String(pathArg)) continue
+          try {
+            const alt = await listDirectories(c, lang)
+            diag('list-dirs:landing-recovered', String(pathArg) + ' -> ' + c)
+            alt.fallbackNote = tr(lang, 'pickFallback', String(pathArg), c)
+            return alt
+          } catch (e3) { /* 试下一个候选 */ }
+        }
+      }
+
+      // 走不下去：返回错误 + 所有还能用的出口
+      let roots = []
+      let home = ''
+      try { roots = await rootsList() } catch (e4) { /* ignore */ }
+      try { home = await baseCwd() } catch (e5) { /* ignore */ }
+      const cap = pickerCapability()
+      return Object.assign(base, {
+        home: home,
+        error: msg,
+        roots: roots,
+        canRetryNative: !!(cap && cap.kind === 'native'),
+        canCreate: !!(cap && cap.kind === 'browse'),
+      })
+    }
+    let dirHint = ''
+    function S_dir_hint() { return dirHint }
 
     // ── 会话文件识别 ──────────────────────────────────────────────
     //
@@ -1056,6 +1373,7 @@ export function apply(ctx) {
      * 公共目录太浅（跨盘）时退回该会话的 cwd。
      */
     async function sessionFileActivity(dir, lang) {
+      const sessionQuery = svc('sessionQuery')
       if (sessionQuery === undefined) {
         return { available: false, message: tr(lang, 'sessionUnavailable'), files: [] }
       }
@@ -1220,6 +1538,116 @@ export function apply(ctx) {
     }
 
     // ── 编码 ──────────────────────────────────────────────────────
+
+    /**
+     * 计算文件的 git blob SHA-1（`sha1("blob <size>\0" + content)`）。
+     *
+     * 为什么要自己算：GitHub 的 tree 接口**直接给出每个 blob 的 sha 和 size**，
+     * 所以只要能算出本地文件的同一个 sha，就能**不发任何额外请求**地判断
+     * "这个文件相对远程到底改了没有" —— 比按修改时间猜可靠得多，也是"上传未更新的改动"
+     * 这个功能的基础。SHA-1 是 git 的对象格式要求，不是拿来做安全用途。
+     */
+    function gitBlobSha(bytes) {
+      const header = 'blob ' + bytes.length + '\u0000'
+      // Buffer 与 Uint8Array 共用底层内存，但 Buffer.isBuffer 之外的类型没有 .buffer 时
+      // 必须退回数组本身 —— 否则从子进程或 TextEncoder 拿到的是 Uint8Array，长度会算错。
+      const view = Buffer.isBuffer(bytes)
+        ? bytes
+        : Buffer.from(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.length)
+      const h = createHash('sha1')
+      h.update(header, 'utf8')
+      h.update(view)
+      return h.digest('hex')
+    }
+
+    /**
+     * 列出「本地与远程分支不一致、也就是还没上传（或上传后又被改过）」的文件。
+     *
+     * 这是用户真正想要的语义：跨多轮对话累计的改动，而不是只看当前这一轮会话日志。
+     * 判定完全基于内容，不需要用户在 DSH 之外做任何事：
+     *   1. 读远程分支的 head → 拿它的 tree（`recursive=1`，**只此一次请求**）；
+     *   2. 逐文件比对：远程没有 → 新增；大小不同 → 已改；大小相同但 sha 不同 → 已改；
+     *      sha 相同 → 未改（跳过）。
+     * 因为 tree 自带 sha，绝大多数文件不需要再发请求；只有"需要算本地 sha"时才读盘。
+     * `deep` 打开时对**所有**文件都算 sha（连同样大小的也算），代价是慢一些但结论最准。
+     */
+    async function pendingChanges(owner, repo, dir, branchArg, deep, lang) {
+      if (!owner || !repo) throw new Error(tr(lang, 'needRepo'))
+      if (typeof dir !== 'string' || !dir.trim()) throw new Error(tr(lang, 'dirEmpty'))
+
+      const info = await ghOk('GET', '/repos/' + owner + '/' + repo, undefined, undefined, lang)
+      const branch = String(branchArg || '').trim()
+        || String(info.default_branch || '').trim() || 'main'
+
+      // 本地扫描结果（沿用同一套忽略规则，保证和上传列表一致）
+      const scan = await scanProject(dir, true, lang)
+
+      // 远程树：仓库为空或分支不存在时视为"全都要上传"
+      const remote = {}
+      let remoteOk = false
+      let remoteReason = ''
+      const ref = await gh('GET', '/repos/' + owner + '/' + repo + '/git/ref/heads/' + refPath(branch), undefined, undefined, lang)
+      if (ref.status === 200 && ref.json && ref.json.object && ref.json.object.sha) {
+        const commit = await ghOk('GET', '/repos/' + owner + '/' + repo + '/git/commits/' + String(ref.json.object.sha), undefined, undefined, lang)
+        const treeSha = commit && commit.tree ? String(commit.tree.sha) : ''
+        if (treeSha) {
+          const treeRes = await ghOk('GET', '/repos/' + owner + '/' + repo + '/git/trees/' + treeSha + '?recursive=1', undefined, undefined, lang)
+          const nodes = treeRes && Array.isArray(treeRes.tree) ? treeRes.tree : []
+          for (let i = 0; i < nodes.length; i++) {
+            const n = nodes[i]
+            if (!n || n.type !== 'blob') continue
+            remote[String(n.path)] = { sha: String(n.sha || ''), size: typeof n.size === 'number' ? n.size : -1 }
+          }
+          remoteOk = true
+        }
+      } else if (ref.status === 404 || ref.status === 409) {
+        remoteReason = 'branch-missing'
+      } else {
+        throw new Error(tr(lang, 'refReadFail', ref.status, ghMessage(ref.json, ref.status)))
+      }
+      if (!remoteOk && !remoteReason) remoteReason = 'no-tree'
+
+      const files = []
+      let unchanged = 0
+      let hashed = 0
+      for (let i = 0; i < scan.files.length; i++) {
+        const f = scan.files[i]
+        const rel = String(f.path)
+        const r = remote[rel]
+        let state = ''
+        if (!r) state = 'added'
+        else if (r.size >= 0 && f.size !== r.size) state = 'modified'
+        else if (deep || r.size < 0) {
+          // 同大小：必须比内容才知道有没有改
+          try {
+            const bytes = await readRelBytes(dir, rel)
+            hashed++
+            state = gitBlobSha(bytes) === r.sha ? '' : 'modified'
+          } catch (e) {
+            state = 'modified'  // 读不到就当作要更新，让用户自己决定
+          }
+        } else {
+          // 同大小：git 里"内容不同但大小相同"确实存在，但概率远低于"没改过"。
+          // 默认跳过，避免为了少数情况读遍全仓库；deep=true 时全算。
+          state = ''
+        }
+        if (!state) { unchanged++; continue }
+        files.push({ path: rel, state: state, size: f.size, ignored: f.ignored === true, reason: f.reason || '' })
+      }
+
+      return {
+        repo: String(info.full_name || (owner + '/' + repo)),
+        branch: branch,
+        remoteOk: remoteOk,
+        remoteReason: remoteReason,
+        remoteFiles: Object.keys(remote).length,
+        localFiles: scan.files.length,
+        unchanged: unchanged,
+        hashed: hashed,
+        pending: files.length,
+        files: files,
+      }
+    }
 
     /** 手写 base64：沙箱里的 btoa 只接受「UTF-8 文本」，二进制必须按字节编码。 */
     function bytesToBase64(bytes) {
@@ -1540,9 +1968,14 @@ export function apply(ctx) {
       }
 
       if (op === 'list-dirs') {
-        const listing = await listDirectories(String(args.path || ''), lang)
-        listing.roots = await rootsList()
-        listing.canCreate = pickerCapability() ? pickerCapability().kind === 'browse' : false
+        // 用 safe 版本：起点列不动时自动改到能用的目录；用户主动点进去才如实报错
+        const listing = await listDirectoriesSafe(
+          String(args.path || ''), lang,
+          args.landing === true, String(args.hint || ''))
+        if (!listing.roots) listing.roots = await rootsList()
+        const cap = pickerCapability()
+        if (listing.canCreate === undefined) listing.canCreate = !!(cap && cap.kind === 'browse')
+        if (listing.canRetryNative === undefined) listing.canRetryNative = !!(cap && cap.kind === 'native')
         return listing
       }
 
@@ -1562,16 +1995,16 @@ export function apply(ctx) {
 
       if (op === 'auth-status') {
         await ensureToken()
-        if (!token) return { bound: false, user: null, persisted: tokenWritable }
+        if (!token) return { bound: false, user: null, persist: tokenPersist }
         if (user) {
-          return { bound: true, user: user, token: tokenMeta, hint: tokenHint(tokenMeta, lang), persisted: tokenWritable }
+          return { bound: true, user: user, token: tokenMeta, hint: tokenHint(tokenMeta, lang), persist: tokenPersist }
         }
         try {
           const r = await gh('GET', '/user', undefined, undefined, lang)
           if (r.status >= 400) throw new Error(ghMessage(r.json, r.status))
           user = trimUser(r.json)
           tokenMeta = tokenInfo(r.headers)
-          return { bound: true, user: user, token: tokenMeta, hint: tokenHint(tokenMeta, lang), persisted: tokenWritable }
+          return { bound: true, user: user, token: tokenMeta, hint: tokenHint(tokenMeta, lang), persist: tokenPersist }
         } catch (e) {
           return { bound: false, user: null, error: String(e && e.message ? e.message : e) }
         }
@@ -1593,8 +2026,11 @@ export function apply(ctx) {
           user = trimUser(r.json)
           tokenMeta = tokenInfo(r.headers)
           // 校验通过才落盘，避免把打错的令牌固化下来。
-          const persisted = await persistToken(t)
-          return { bound: true, user: user, token: tokenMeta, hint: tokenHint(tokenMeta, lang), persisted: persisted }
+          const write = await persistToken(t)
+          return {
+            bound: true, user: user, token: tokenMeta, hint: tokenHint(tokenMeta, lang),
+            persist: tokenPersist, wrote: write,
+          }
         } catch (e) {
           token = prev
           user = prevUser
@@ -1609,7 +2045,7 @@ export function apply(ctx) {
         tokenMeta = null
         tokenRestored = true
         await forgetToken()
-        return { bound: false, persisted: tokenWritable }
+        return { bound: false, persist: tokenPersist }
       }
 
       if (op === 'list-repos') {
@@ -1692,6 +2128,13 @@ export function apply(ctx) {
 
       if (op === 'session-files') return await sessionFileActivity(String(args.dir || ''), lang)
 
+      // 跨会话累计的「还没上传的改动」：按内容与远程分支比对，不看会话日志
+      if (op === 'pending-files') {
+        return await pendingChanges(
+          String(args.owner || ''), String(args.repo || ''), String(args.dir || ''),
+          String(args.branch || ''), args.deep === true, lang)
+      }
+
       if (op === 'upload-start') {
         jobSeq += 1
         const job = {
@@ -1763,38 +2206,115 @@ export function apply(ctx) {
       })
     }
 
+    const API_PATH = ROUTE_PREFIX + '/api'
+
+    /**
+     * 记一条启动诊断（仅在 `DSH_GHU_DIAG=1` 时有效）。
+     *
+     * 必须**同步、零依赖**：若走 `await baseCwd()` + `fsx.writeText`，一旦 apply() 在那之前
+     * 已经炸了，`baseCwd()` 内部的 `fsx.resolve('.')` 也会挂，诊断反倒把真正的故障掩盖掉。
+     */
+    function diag(step, detail) {
+      if (!DIAG_ON) return
+      const row = {
+        at: new Date().toISOString(), pid: process.pid, step: step,
+        detail: detail === undefined ? null : String(detail)
+      }
+      // 进程内记录：宿主进程还活着就能读到，不依赖文件系统、不依赖任何服务。
+      try {
+        const g = globalThis
+        if (!g.__DSH_GHU_DIAG__) g.__DSH_GHU_DIAG__ = []
+        g.__DSH_GHU_DIAG__.push(row)
+        if (g.__DSH_GHU_DIAG__.length > 200) g.__DSH_GHU_DIAG__.shift()
+      } catch (e) { /* ignore */ }
+      try { if (fsMod && DIAG_FILE) fsMod.appendFileSync(DIAG_FILE, JSON.stringify(row) + '\n') } catch (e2) { /* ignore */ }
+      try { console.log(TAG + ' [diag] ' + JSON.stringify(row)) } catch (e3) { /* ignore */ }
+    }
+
+    /** 真正的请求处理：始终回 JSON，前端才不会看到 "no response"。 */
+    async function handleApi(req, res) {
+      try {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: false, error: 'method not allowed: ' + req.method + '（本接口只用 POST）' }))
+          return
+        }
+        const body = await readBody(req)
+        let args = {}
+        try { args = JSON.parse(body || '{}') } catch (e) { args = {} }
+        let payload
+        try {
+          payload = { ok: true, data: await dispatch(args) }
+        } catch (err) {
+          payload = { ok: false, error: String(err && err.message ? err.message : err) }
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(payload))
+      } catch (err) {
+        console.error('[dsh-github-upload] route error', err)
+        try {
+          res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: false, error: 'internal error: ' + String(err && err.message ? err.message : err) }))
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    /**
+     * 注册 API 路由。
+     *
+     * 分三层，因为「注册成功」不能只依赖 Cordis 的调度：一旦 `ctx.effect` 的回调没被调用
+     * （或调用时 register 抛错被 Cordis 吞掉），就变成「进程说已挂载、路由其实不存在」，
+     * 前端只拿到兜底路由的 405。
+     *
+     *   1. 先**同步注册一次**，并记录真实结果（注册不上就立刻说清楚，不假装挂载成功）；
+     *   2. 再用 `ctx.effect` 做一次幂等重试，保证生命周期正确（fiber 卸载时会 dispose）；
+     *   3. 最后用 `timer` 做保底重试：万一 effect 没被调用，
+     *      定时器仍会把路由挂上 —— 定时器只依赖硬依赖 `inject: ['timer']`，比 effect 更可靠。
+     */
+    let routeDisposer = null
+    let routeRetryStop = null
+
+    function tryRegisterRoute(why) {
+      if (routeDisposer) return true
+      try {
+        routeDisposer = wsvc.register({ kind: 'exact', path: API_PATH, handler: handleApi })
+        diag('register:ok', API_PATH + ' via=' + why + ' dispose=' + typeof routeDisposer)
+        console.log(TAG + ' 路由已注册: ' + API_PATH + '（' + why + '）')
+        if (routeRetryStop) { try { routeRetryStop() } catch (e) { /* ignore */ } routeRetryStop = null }
+        return true
+      } catch (err) {
+        diag('register:FAILED', API_PATH + ' via=' + why + ' :: ' + String(err && err.stack ? err.stack : err))
+        console.error(TAG + ' 路由注册失败 ' + API_PATH + '（' + why + '）：', err)
+        return false
+      }
+    }
+
+    // 1) 同步注册：apply() 里立刻做，不依赖任何调度。
+    tryRegisterRoute('apply-sync')
+
+    // 2) 生命周期内重试一次（effect 正常时它就是权威路径）。
     ctx.effect(function () {
-      return wsvc.register({
-        kind: 'exact',
-        path: ROUTE_PREFIX + '/api',
-        handler: async function (req, res) {
-          try {
-            if (req.method !== 'POST') {
-              res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' })
-              res.end('method not allowed')
-              return
-            }
-            const body = await readBody(req)
-            let args = {}
-            try { args = JSON.parse(body || '{}') } catch (e) { args = {} }
-            let payload
-            try {
-              payload = { ok: true, data: await dispatch(args) }
-            } catch (err) {
-              payload = { ok: false, error: String(err && err.message ? err.message : err) }
-            }
-            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-            res.end(JSON.stringify(payload))
-          } catch (err) {
-            console.error('[dsh-github-upload] route error', err)
-            try {
-              res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' })
-              res.end('internal error')
-            } catch (e) { /* ignore */ }
-          }
-        },
-      })
+      tryRegisterRoute('effect')
+      return function () {
+        if (routeDisposer) { try { routeDisposer() } catch (e) { /* ignore */ } routeDisposer = null }
+      }
     }, 'dsh-github-upload: api route')
 
-    console.log('[dsh-github-upload] mounted / 已挂载: ' + ROUTE_PREFIX + '/api')
+    // 3) 保底：每 2 秒重试，直到注册成功为止。只依赖 inject 里的 timer 服务。
+    if (!routeDisposer) {
+      let tries = 0
+      try {
+        routeRetryStop = ctx.interval(function () {
+          tries += 1
+          if (routeDisposer || tries > 30) { if (routeRetryStop) { routeRetryStop() }; routeRetryStop = null; return }
+          tryRegisterRoute('timer#' + tries)
+        }, 2000)
+        diag('register:retry-armed', '每 2 秒重试，最多 30 次')
+      } catch (e) {
+        diag('register:retry-failed', String(e && e.message ? e.message : e))
+      }
+    }
+
+    diag('apply:done', 'route=' + (routeDisposer ? 'registered' : 'NOT-registered'))
+    console.log(TAG + ' mounted / 已挂载: ' + API_PATH + '  路由=' + (routeDisposer ? 'OK' : '未注册!'))
 }

@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-github-upload",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "One-button GitHub upload for DeepSeek Harness (bilingual zh/en)",
@@ -33,9 +33,13 @@
   },
   "scripts": {
     "build": "node build/bundle.mjs",
-    "test": "node scripts/test-render.mjs && node scripts/test-cleandir.mjs",
+    "test": "node scripts/test-render.mjs && node scripts/test-cleandir.mjs && node scripts/test-internals.mjs && node scripts/test-blobsha.mjs && node scripts/test-picker.mjs && node scripts/test-artifact.mjs",
     "test:render": "node scripts/test-render.mjs",
-    "check": "node build/bundle.mjs && node scripts/test-render.mjs && node scripts/test-cleandir.mjs"
+    "test:internals": "node scripts/test-internals.mjs",
+    "test:blobsha": "node scripts/test-blobsha.mjs",
+    "test:picker": "node scripts/test-picker.mjs",
+    "check": "node build/bundle.mjs && node scripts/test-render.mjs && node scripts/test-cleandir.mjs && node scripts/test-internals.mjs && node scripts/test-blobsha.mjs && node scripts/test-picker.mjs && node scripts/test-artifact.mjs",
+    "test:artifact": "node scripts/test-artifact.mjs"
   },
   "keywords": [
     "dsh",

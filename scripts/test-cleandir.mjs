@@ -1,5 +1,8 @@
-// 临时测试：从 src/client.js 里抽出 cleanDir 并验证边界情况。
+// 单元测试：从 src/client.js 里抽出 cleanDir 并验证边界情况。
 // 用法：node scripts/test-cleandir.mjs
+//
+// 夹具故意用一个**含空格**的路径，因为"路径里有空格"正是这里最容易出错的地方
+// （资源管理器「复制为路径」会连引号一起复制，引号必须被剥掉）。
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -26,41 +29,42 @@ const source = src.slice(start, end)
 // eslint-disable-next-line no-new-func
 const cleanDir = new Function(source + '\nreturn cleanDir')()
 
+const P = 'C:\\my projects\\sample app'
 const cases = [
-  ['D:\\dsh plugins\\dsh-github-upload', 'plain'],
-  ['"D:\\dsh plugins\\dsh-github-upload"', 'quoted (Copy as path)'],
-  ["'D:\\dsh plugins\\dsh-github-upload'", 'single-quoted'],
-  ['\u201CD:\\dsh plugins\\dsh-github-upload\u201D', 'full-width quoted'],
-  ['D:\\\\dsh plugins\\\\dsh-github-upload', 'doubled separators'],
-  ['D:/dsh plugins/dsh-github-upload/', 'forward slashes + trailing'],
-  ['  D:\\dsh plugins\\dsh-github-upload  ', 'padded spaces'],
-  ['D:\\', 'drive root'],
+  [P, 'plain'],
+  [`"${P}"`, 'quoted (Copy as path)'],
+  [`'${P}'`, 'single-quoted'],
+  [`\u201C${P}\u201D`, 'full-width quoted'],
+  ['C:\\\\my projects\\\\sample app', 'doubled separators'],
+  ['C:/my projects/sample app/', 'forward slashes + trailing'],
+  [`  ${P}  `, 'padded spaces'],
+  ['C:\\', 'drive root'],
   ['/', 'posix root'],
   ['\\\\server\\share\\proj', 'UNC'],
   ['', 'empty'],
   ['   ', 'blank'],
-  ['"D:\\dsh plugins\\dsh-github-upload\\"', 'quoted + inner trailing slash'],
-  ['"  D:\\dsh plugins\\dsh-github-upload  "', 'quoted with padding'],
+  [`"${P}\\"`, 'quoted + inner trailing slash'],
+  [`"  ${P}  "`, 'quoted with padding'],
 ]
 
 let failed = 0
 for (const [input, label] of cases) {
   const got = cleanDir(input)
   const expect = {
-    plain: 'D:\\dsh plugins\\dsh-github-upload',
-    'quoted (Copy as path)': 'D:\\dsh plugins\\dsh-github-upload',
-    'single-quoted': 'D:\\dsh plugins\\dsh-github-upload',
-    'full-width quoted': 'D:\\dsh plugins\\dsh-github-upload',
-    'doubled separators': 'D:\\dsh plugins\\dsh-github-upload',
-    'forward slashes + trailing': 'D:/dsh plugins/dsh-github-upload',
-    'padded spaces': 'D:\\dsh plugins\\dsh-github-upload',
-    'drive root': 'D:\\',
+    plain: P,
+    'quoted (Copy as path)': P,
+    'single-quoted': P,
+    'full-width quoted': P,
+    'doubled separators': P,
+    'forward slashes + trailing': 'C:/my projects/sample app',
+    'padded spaces': P,
+    'drive root': 'C:\\',
     'posix root': '/',
     UNC: '\\\\server\\share\\proj',
     empty: '',
     blank: '',
-    'quoted + inner trailing slash': 'D:\\dsh plugins\\dsh-github-upload',
-    'quoted with padding': 'D:\\dsh plugins\\dsh-github-upload',
+    'quoted + inner trailing slash': P,
+    'quoted with padding': P,
   }[label]
   const ok = got === expect
   if (!ok) failed++

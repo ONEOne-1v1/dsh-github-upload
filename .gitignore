@@ -1,8 +1,17 @@
-# 构建产物
-dist/
-
-# 依赖与临时文件
+# 依赖
 node_modules/
+
+# 渲染预览（scripts/preview.mjs 生成，只作本地验收）
+preview.html
+shots/
+
+# 启动诊断（仅在 DSH_GHU_DIAG=1 时写出；默认不产生任何文件）
 *.log
+.dsh-ghu-*.log
+.dsh-ghu-*.jsonl
+
+# 编辑器与系统
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/

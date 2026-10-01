@@ -16,10 +16,33 @@ Bilingual UI (中文 / English, switchable in the panel header). [中文说明](
 | --- | --- |
 | **Account** | Paste a GitHub Personal Access Token → verify and bind; shows token type / scopes / expiry, with an actionable hint when the token cannot see repositories; optional "remember"; one-click environment self-test |
 | **Repositories** | Lists every repository the account can reach (owned + collaborator + organization member + organizations + public fallback), searchable and selectable; create a repository as public or private; **the list refreshes automatically after create / rename / visibility change**; when the list is unusable, point at `owner/repo` directly |
-| **Upload** | **The project directory is detected from the chat itself** — open the tab and the folder this conversation is working in is already filled in (no folder-picking required) → scan (built-in ignore rules + `.gitignore`) → **"Files from this chat" ticks the files this conversation wrote or edited** (each such file also carries a marker in the tree) → commit message / target branch → upload with live progress and a log. `Choose folder` (system dialog or built-in browser) and manual entry remain available. |
+| **Upload** | **The project directory is detected from the chat itself** — open the tab and the folder this conversation is working in is already filled in (no folder-picking required) → scan (built-in ignore rules + `.gitignore`) → **"Unpushed changes" ticks every file that differs from the remote branch** (accumulated across conversations, compared by content; files this chat touched also carry a marker in the tree) → commit message / target branch → upload with live progress and a log. `Choose folder` (built-in browser, plus a system-dialog button) and manual entry remain available. |
 
 > **What does ticking actually do?** Ticked files are **added or overwritten** on GitHub; files left unticked **stay exactly as they are on the remote**. Only the「exact sync」checkbox (`Delete remote files that are not selected`) removes remote files. Ticking everything is therefore the right move for a plain "push my project" — the per-chat selection exists for focused commits and for skipping a large repo's untouched files.
 | **Repository settings** | Rename, description, homepage, topics, public ↔ private, Issues/Wiki switches, archive, delete |
+
+> **The panel is a floating card, not an edge-docked drawer.** The desktop window's close / exit buttons sit in the
+> top-right corner, so the panel keeps a gap on all four sides (top inset `--ghu-top`, 52px by default — see
+> `src/client.css`): the close button lives at the panel's **bottom-right**, the header's left end is a "minimize"
+> button, and clicking outside or pressing Esc also dismisses it. The window corner therefore stays clear.
+>
+> **The corner entry button is a 46×46 circle: a DSH-themed surface with the GitHub logo (30px) plus a status dot.**
+> There is no text on it (the wording lives in the tooltip / accessible name). It can be dragged flush to any edge
+> (vertical range is limited to the lower half, away from the title bar) and it **never changes size** — it does not
+> expand on hover, nor while the panel is open. That is deliberate: an entry button that expands on hover jitters
+> when parked at an edge (grow → overflow → clamp back → pointer leaves → collapse), which makes it impossible to
+> drag or click reliably.
+>
+> Note it is **not** the dark GitHub-brand pill: that dark language looks like a foreign sticker on DSH's light UI.
+> The surface uses `--dsw-alias-bg-layer-2` + an elevation shadow + a 1px hairline stroke, the icon uses
+> `--dsw-alias-label-primary`, and hover uses `--dsw-alias-interactive-bg-hover-solid` — it is "a DSH overlay button
+> that happens to carry the GitHub mark".
+>
+> ⚠️ **Both the button and the status dot must pin `corner-shape:round`.** The DSH theme ships a global rule
+> (`dsh-client-ui-theme` → `corner-shape.css`) that turns every corner into a "superellipse" (squircle). That is a
+> good look for cards, but it squashes a `border-radius:50%` circle into a **rounded square**. Only browsers that
+> support the property (Chrome/Edge 139+) show it that way — drop those two declarations and the button stops
+> looking round.
 
 ---
 
@@ -31,8 +54,8 @@ dsh-github-upload/
 ├─ client.js         GENERATED ModuleLoader artifact (UI + CSS), registers into shell.overlay
 ├─ src/
 │  ├─ host.js        Host half: API route, GitHub calls, scanning, upload job (real ES module)
-│  ├─ client.js      Browser UI (corner button + drawer panel), bilingual catalog
-│  └─ client.css     Panel styles (all DSH theme tokens, light/dark automatic)
+│  ├─ client.js      Browser UI (corner button + floating panel), bilingual catalog
+│  └─ client.css     Panel styles (all DSH theme tokens, light/dark automatic; `--ghu-top` sets the top inset)
 ├─ cordis.patch.yml  Bundle patch: inserts the plugin row
 ├─ locale/           Display metadata for the Plugin Manager (zh + en)
 ├─ icon.svg          Bundle icon
@@ -84,31 +107,61 @@ Follow the result's `application` and `warnings` fields — not server logs — 
 
 | Changed | Effective after |
 | --- | --- |
-| `src/client.js`, `src/client.css` | `npm run build`, then refresh the page (**no restart**) |
+| `src/client.js`, `src/client.css` | `npm run build`, then **restart DSH** (see the cache trap below — a page refresh alone may not be enough) |
 | `src/host.js`, `index.js`, `cordis.patch.yml`, `package.json` | `install_bundle` again, then a Harness restart to load a fresh module generation |
 
-The profile installs this package as a **link** to the working directory (`link:D:/dsh plugins/dsh-github-upload`), so the files on disk are the files that run.
+> **Trap: after rebuilding the client, a page refresh may still run the old UI.**
+> DSH serves client modules with `cache-control: public, max-age=31536000, immutable`, at a URL shaped like
+> `/plugins/??<pkg>/client.js&rev=<content hash>`. That `rev` **only changes when HMR recomputes it**
+> (`rebuilt(id)` in `dsh-client-modules`). If HMR does not recompute it, the URL is unchanged and the browser
+> serves its "immutable" cached copy — refreshing any number of times returns the old bundle.
+> **Restart DSH** so the host recomposes and hands out a new `rev`.
+> To check which build a page is actually running: panel → Account → Local environment → "UI build", shown as
+> `1.0.1+252bba5a` (version + asset fingerprint, generated by `build/bundle.mjs` and printed during the build).
+>
+> **Debugging a plugin that did not mount**: start DSH with `DSH_GHU_DIAG=1` and the host writes one record
+> when the module is loaded plus one per step of `apply()`, to `DSH_GHU_DIAG_FILE` (default: a
+> `dsh-github-upload-diag.jsonl` in the system temp directory) and to the console. It is off by default and
+> writes nothing when off. It separates "the new code was never loaded" from "loaded, but a later step
+> failed silently".
+
+The profile installs this package as a **link** to the working directory (`link:/path/to/dsh-github-upload`, materialised on Windows as a junction under `node_modules/@local/`), so the files on disk are the files that run — and no reinstall is needed after an edit.
+
+> **Watch out:** the profile's dependency can also be a GitHub spec (`github:<owner>/<repo>`). That installs a **snapshot copy**, not a link, so local edits stay invisible (this is exactly how a "fixed but still broken" panel happens). `plugin_manager install_bundle <absolute workspace path>` switches it to the link form.
 
 ### Why the UI is a generated artifact
 
 Earlier versions served the UI over an HTTP route and tapped `index.html` to inject a `<script>` tag. That is no longer needed: the package declares `dsh.client` and the page's own module loader loads `client.js`, which registers a component into the `shell.overlay` slot. `src/client.js` stays a plain browser script (it imports nothing), and the build wraps it — so the UI code is unchanged while the delivery is now the supported one.
 
+> **Loading contract (read before touching `build/bundle.mjs`)**: the artifact's `factory` only pulls
+> in `react` and returns the plugin object; **the UI script is wrapped as `mountUi()` and runs exactly
+> once, from `apply()`** — never move it back into the factory body. `src/client.js` is a
+> self-executing IIFE whose first line returns early once it has initialised, so running it at factory
+> time makes the `apply()` run hit that guard: the slot registration and the mount entry point are
+> skipped, the plugin still reports `active`, and the UI never appears — with no error at all.
+> `scripts/test-artifact.mjs` guards exactly this: it loads the generated artifact and walks the real
+> load → apply → mount path.
+
 ### Tests
 
 ```bash
-npm run check     # client syntax → build (host syntax precheck) → render smoke test → cleanDir unit test
-npm test          # just the two test files
+npm run check     # client syntax → build (host syntax precheck) → render smoke test → cleanDir unit test → host-internals unit test
+npm test          # just the three test files
 ```
 
-`scripts/test-render.mjs` is a **headless smoke test**: it mounts `src/client.js` against a minimal DOM stub, then clicks the entry button, switches to the Upload tab and presses Scan, asserting that a request is actually issued. It exists because the worst bug so far was a `render()` crash — the backend was perfectly healthy and `curl` could not see it, but the UI silently stopped responding.
+`scripts/test-render.mjs` is a **headless smoke test**: it mounts `src/client.js` against a minimal DOM stub, then clicks the entry button, switches to the Upload tab and presses Scan, asserting that a request is actually issued. It exists because the worst bug so far was a `render()` crash — the backend was perfectly healthy and `curl` could not see it, but the UI silently stopped responding. It also guards the desktop layout: no interactive control in the panel's top-right corner, a top gap in the panel geometry, and a draggable entry button that cannot be parked over the window controls.
 
-The test carries its own negative control:
+`scripts/test-internals.mjs` extracts the host's riskiest pure functions (hand-written base64 encoder, ref/content path encoding, `.gitignore` matching, project-root inference) out of `src/host.js` and asserts them directly.
+
+Every regression test carries its own negative control, and each one must FAIL:
 
 ```bash
-NEGATIVE_CONTROL=drop-null-guard node scripts/test-render.mjs   # must FAIL
+NEGATIVE_CONTROL=drop-null-guard       node scripts/test-render.mjs   # render() crash
+NEGATIVE_CONTROL=raw-localstorage-read node scripts/test-render.mjs   # quoted default directory
+NEGATIVE_CONTROL=close-in-header       node scripts/test-render.mjs   # controls back in the header
+NEGATIVE_CONTROL=docked-panel          node scripts/test-render.mjs   # panel back over the window corner
+NEGATIVE_CONTROL=fab-unclamped         node scripts/test-render.mjs   # entry button back in the title bar
 ```
-
-which re-injects that exact bug and must reproduce the symptom, proving the test can still catch it.
 
 ---
 
@@ -132,6 +185,7 @@ Every browser call is `POST /dsh-gh/api` with `{ op, lang, ...args }`, answering
 | `delete-repo` | `owner, repo` | Delete a repository (needs `delete_repo`) |
 | `scan` | `dir, useGitignore` | Recursively scan a directory: file list, ignore reasons, pruned directories |
 | `session-files` | `dir?` | Detect the files this chat wrote / edited / read, by replaying `tool/call` records from a session. **Omit `dir`** to have the host pick the live session and infer the project root from the common directory of the files it mutated (returns `projectRoot` + `rootSource`) |
+| `pending-files` | `owner, repo, dir, branch?, deep?` | List the files whose content differs from the remote branch — the "unpushed changes" comparison. One tree read plus a per-file size / git-blob-sha check; `deep` also byte-compares equal-sized files |
 | `pick-folder` | — | Open the folder picker: the `native` backend opens the OS dialog and returns an absolute path; `browse`/none returns a `mode` so the UI draws its own browser |
 | `list-dirs` | `path` | List one directory level (crumbs, jumpable roots, whether folder creation is supported) |
 | `mkdir-dir` | `parent, name` | Create a folder (only with the `browse` backend; the system dialog has its own "New folder") |
@@ -185,10 +239,15 @@ Uploads go through the GitHub **Git Data API**: read branch head → create one 
 
 1. **No button** → refresh the page first (the client artifact is loaded by the page's module loader). Still missing? Check Settings → Plugins that `@local/dsh-github-upload` is enabled; it is a local profile bundle, not a shipped official one.
 2. **The button is visible but cannot be clicked** → `shell.overlay` is a click-through layer, so an entry must opt back into pointer events. The `.ghu-slot-host` / `#dsh-ghu-root` / `#dsh-ghu-fab` rules in `src/client.css` do exactly that — do not remove them.
-3. **Bound, but the repository list is empty** → read the "source diagnostics" and the guidance in the panel; check the token scopes first (section 7), or type `owner/repo` under "Point at a repository directly".
-4. **"Choose folder" opens the built-in browser, not a system dialog** → this is deliberate. The host's native picker can hang forever when its OS dialog cannot open (missing koffi, remote deployment), which used to freeze the button. The built-in browser only uses the host's `fs` listing and always works; the system dialog is available as an optional "Try the system dialog" button inside it, guarded by a 25-second timeout. Account → Local environment shows which backend kind is active.
-5. **"Scan" does nothing / the Upload tab looks half-drawn** → this was a frontend crash (fixed in 0.7.1) where `render()` threw before the request was sent. If it ever comes back, run `npm run check`: the headless smoke test asserts that clicking Scan actually issues a request.
-6. **Upload returns 403 / 404** → the token lacks `Contents: write`, or the owner / repository name is wrong.
-7. **"Git Repository is empty"** → the target repository has no commits yet. This is handled automatically since 0.5.0; if you still see it, the Contents-API bootstrap failed — read the job log for the seeding line.
-8. **The default directory came back wrapped in quotes** → this was **our own bug** (fixed in 0.7.2), not a bad paste. `keep()` writes to `localStorage` with `JSON.stringify`, so the stored text already contains quotes; `boot()` used to read it back raw and the quotes became part of the path — producing exactly the `Directory does not exist: "D:\..."` error seen earlier. Every preference is now read through `readString()` (JSON-decoding, tolerant of legacy double-encoding) and self-healed on startup. The path field still tolerates a pasted quoted path, since that genuinely happens too.
-9. **Language looks half-switched** → switching language clears the previous scan and job state on purpose (host-rendered strings such as ignore reasons are already in the old language). Re-scan if you had one.
+3. **The panel covers the window's close / exit button** → in DSH Desktop the window controls are drawn *above* the page in the top-right corner. Two things together keep them reachable:
+   (a) the panel header is **title-only**, with the language switch and Close button in the bottom control bar (`.ghu-panelctl`, right-aligned) — do not move them back into the header;
+   (b) the panel is a **floating card** with a gap on all four sides (`top:var(--ghu-top)`, 52px by default — see `#dsh-ghu-panel`), **not** a drawer running from the window's top edge to the bottom — do not restore `top:0;right:0;bottom:0`.
+   Dismiss it with the header's minimize button, the bottom-right Close button, **Esc**, a click outside, or the corner button again.
+   `npm run check` guards both with four assertions and three negative controls (`NEGATIVE_CONTROL=docked-panel` / `fab-unclamped` / `close-in-header`).
+4. **Bound, but the repository list is empty** → read the "source diagnostics" and the guidance in the panel; check the token scopes first (section 7), or type `owner/repo` under "Point at a repository directly".
+5. **"Choose folder" opens the built-in browser — where is the system dialog?** → the built-in browser opens first (crumbs, drives, filter, new-folder, and a clear view of the directory structure). Its footer has a **"System dialog"** button (shown only when the host's native picker is available) that opens the OS chooser. The two complement each other: the browser lists directories through `uiWorkspace.listDirectory()`, which is refused in a few system-restricted locations (for example the root `D:\`); the OS dialog needs no listing, so you can navigate anywhere. On a host without a native picker (a remote deployment, say) the button does not appear and the browser is used alone.
+6. **"Scan" does nothing / the Upload tab looks half-drawn** → this was a frontend crash (fixed in 0.7.1) where `render()` threw before the request was sent. If it ever comes back, run `npm run check`: the headless smoke test asserts that clicking Scan actually issues a request.
+7. **Upload returns 403 / 404** → the token lacks `Contents: write`, or the owner / repository name is wrong.
+8. **"Git Repository is empty"** → the target repository has no commits yet. This is handled automatically since 0.5.0; if you still see it, the Contents-API bootstrap failed — read the job log for the seeding line.
+9. **The default directory came back wrapped in quotes** → this was **our own bug** (fixed in 0.7.2), not a bad paste. `keep()` writes to `localStorage` with `JSON.stringify`, so the stored text already contains quotes; `boot()` used to read it back raw and the quotes became part of the path — producing exactly the `Directory does not exist: "D:\..."` error seen earlier. Every preference is now read through `readString()` (JSON-decoding, tolerant of legacy double-encoding) and self-healed on startup. The path field still tolerates a pasted quoted path, since that genuinely happens too.
+10. **Language looks half-switched** → switching language clears the previous scan and job state on purpose (host-rendered strings such as ignore reasons are already in the old language). Re-scan if you had one.
